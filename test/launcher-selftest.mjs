@@ -7,7 +7,7 @@
 //
 // Nothing here starts a browser or touches a real profile.
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, existsSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, writeFileSync, mkdirSync, readFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -133,17 +133,17 @@ try {
   // decides what counts as a clone is the single most dangerous function here.
   // It is extracted and called directly: driving it through `gaze sync` would
   // mean actually deleting a real profile to test the accept cases.
-  const guard = (path) => {
+  const guardPath = (path) => {
     try {
-      execFileSync('bash', ['-c',
+      return execFileSync('bash', ['-c',
         `set -uo pipefail
          CLONES="$HOME/.local/share/gaze/profiles"
          eval "$(sed -n '/^assert_clone(){/,/^}/p' ${JSON.stringify(GAZE)})"
          assert_clone ${JSON.stringify(path)}`],
-        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-      return true;                       // accepted
-    } catch { return false; }            // refused
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    } catch { return null; }             // refused
   };
+  const guard = (path) => guardPath(path) !== null;
   const HOME = process.env.HOME;
   const CLONES = `${HOME}/.local/share/gaze/profiles`;
 
@@ -169,6 +169,27 @@ try {
   check('a clone that does not exist yet is accepted',
         guard(`${HOME}/snap/chromium/common/gaze-auth`));
   check('a browser never synced before is accepted', guard(`${CLONES}/vivaldi`));
+
+  // A symlink inside the clone root pointing OUT of it must be refused: this is
+  // the case realpath resolution exists for.
+  const outside = join(scratch, 'outside');
+  mkdirSync(outside, { recursive: true });
+  const linkPath = join(CLONES, 'selftest-escape-link');
+  mkdirSync(CLONES, { recursive: true });
+  rmSync(linkPath, { force: true });
+  symlinkSync(outside, linkPath);
+  check('a symlink out of the clone root is refused', !guard(linkPath));
+
+  // And the subtle one: `link/..` is removed lexically BEFORE symlinks are
+  // resolved, so the guard must hand back a path inside the root -- and that
+  // resolved path, not the raw string, is what reaches `rm -rf`. If a future
+  // change ever passes the raw path through instead, this deletes the wrong
+  // directory, and this check is what catches it.
+  const viaLink = guardPath(`${linkPath}/../not-a-real-clone`);
+  check('a symlink plus .. cannot escape the clone root',
+        viaLink !== null && viaLink.startsWith(CLONES + '/') && !viaLink.includes(outside),
+        String(viaLink));
+  rmSync(linkPath, { force: true });
 
   console.log(`${pass} passed, ${fail} failed`);
 } finally {
