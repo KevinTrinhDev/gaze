@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/banner.svg" alt="gaze" width="100%">
+<img src="docs/banner.png" alt="gaze" width="100%">
 
 <br>
 
