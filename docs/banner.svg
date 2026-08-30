@@ -1,38 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 280" width="1280" height="280" role="img" aria-label="gaze: it sees the page, and it acts">
-  <defs>
-    <radialGradient id="vig" cx="30%" cy="50%" r="72%">
-      <stop offset="0%" stop-color="#121821"/>
-      <stop offset="100%" stop-color="#07080a"/>
-    </radialGradient>
-    <linearGradient id="slit" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#8CFAB0"/>
-      <stop offset="48%" stop-color="#33D17A"/>
-      <stop offset="100%" stop-color="#0E5C34"/>
-    </linearGradient>
-  </defs>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 260" width="1280" height="260" role="img" aria-label="GAZE. A real browser, already logged in.">
+  <rect width="1280" height="260" fill="#0B0D0F"/>
 
-  <rect width="1280" height="280" fill="url(#vig)"/>
+  <!-- one solid mark. nothing illustrated, nothing rendered -->
+  <rect x="96" y="94" width="10" height="66" fill="#2FBF71"/>
 
-  <g transform="translate(388 140)" fill="none">
-    <circle r="96" stroke="#161f1a" stroke-width="1"/>
-    <circle r="76" stroke="#1d3527" stroke-width="1"/>
-    <circle r="56" stroke="#2b6b45" stroke-width="1.25"/>
-    <circle r="37" stroke="#33D17A" stroke-width="1.5" opacity="0.95"/>
-    <g stroke="#2b6b45" stroke-width="1.25" stroke-linecap="round">
-      <path d="M-108 0h-16M108 0h16M0 -108v-16M0 108v16"/>
-    </g>
-    <path d="M0 -32 C 6.5 -16, 6.5 16, 0 32 C -6.5 16, -6.5 -16, 0 -32 Z"
-          fill="url(#slit)" stroke="none"/>
-    <circle r="2.6" cx="-15" cy="-24" fill="#E8FBEF" stroke="none" opacity="0.7"/>
-  </g>
+  <text x="140" y="140" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace"
+        font-size="56" font-weight="600" fill="#F2F5F3" letter-spacing="17">GAZE</text>
 
-  <g transform="translate(554 0)">
-    <text x="0" y="140" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace"
-          font-size="80" font-weight="500" fill="#EAF0EC" letter-spacing="16">gaze</text>
-    <rect x="4" y="164" width="360" height="1" fill="#22452f"/>
-    <text x="4" y="194" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif"
-          font-size="20" fill="#96A3AE">It sees the page, and it acts.</text>
-    <text x="4" y="226" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace"
-          font-size="12" fill="#4E5B66" letter-spacing="3.2">CHROMIUM / CDP &#160;&#160;&#183;&#160;&#160; FIREFOX / WEBDRIVER BiDi &#160;&#160;&#183;&#160;&#160; CLI &#38; MCP</text>
-  </g>
+  <text x="143" y="176" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace"
+        font-size="14.5" fill="#7C8A93" letter-spacing="5">A REAL BROWSER, ALREADY LOGGED IN</text>
+
+  <rect x="96" y="210" width="1088" height="1" fill="#1B2126"/>
+  <text x="96" y="238" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace"
+        font-size="12.5" fill="#4C585F" letter-spacing="3.8">CLI &#38; MCP &#160;&#160;/&#160;&#160; CHROMIUM &#38; FIREFOX &#160;&#160;/&#160;&#160; APPROVAL REQUIRED</text>
 </svg>
