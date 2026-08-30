@@ -109,7 +109,11 @@ try {
   // later, and aborts -- so `start` reports "up" and the browser vanishes
   // seconds afterwards. Clearing the lock happens before the cookie check, so
   // this exercises it without ever launching a browser.
-  const staleProfile = join(scratch, 'gaze-auth');
+  // Must live under the real clone root: the path guard (correctly) refuses a
+  // scratch directory in /tmp, even one named gaze-auth. This is a throwaway
+  // name no browser in the table uses, and it is removed again below.
+  const staleProfile = join(process.env.HOME, '.local/share/gaze/profiles',
+                            'selftest-stale-lock');
   mkdirSync(staleProfile, { recursive: true });
   writeFileSync(join(staleProfile, 'SingletonLock'), '');
   // A port nothing is on, so this never short-circuits on "already running"
@@ -122,6 +126,7 @@ try {
   // It still refuses to run: the profile has no cookies, so it is not a clone.
   check('a profile with no cookies is still refused',
         stale.code !== 0 && /gaze sync/.test(stale.out), `exit ${stale.code}`);
+  rmSync(staleProfile, { recursive: true, force: true });
 
   // ---- the path guard, exercised directly -----------------------------------
   // `sync` and `start` both delete things under GAZE_PROFILE, so the guard that
@@ -149,6 +154,12 @@ try {
   check('$HOME itself is refused', !guard(HOME));
   check('/ is refused', !guard('/'));
   check('an unrelated directory is refused', !guard('/tmp'));
+  // A bare */gaze-auth match would accept these. They have nothing to do with
+  // gaze, and both would have been handed to `rm -rf`.
+  check('/tmp/gaze-auth is refused', !guard('/tmp/gaze-auth'));
+  check('/etc/gaze-auth is refused', !guard('/etc/gaze-auth'));
+  check('a traversal ending in gaze-auth is refused',
+        !guard(`${CLONES}/../../../../../../tmp/gaze-auth`));
 
   // ...and every legitimate clone path in the BROWSERS table still works,
   // including ones that do not exist yet, which is the first-sync case.
@@ -157,6 +168,7 @@ try {
         guard(`${HOME}/snap/brave/current/.config/BraveSoftware/gaze-auth`));
   check('a clone that does not exist yet is accepted',
         guard(`${HOME}/snap/chromium/common/gaze-auth`));
+  check('a browser never synced before is accepted', guard(`${CLONES}/vivaldi`));
 
   console.log(`${pass} passed, ${fail} failed`);
 } finally {

@@ -80,20 +80,38 @@ row_for(){ echo "$BROWSERS" | grep "^$1|" | head -1; }
 # straight through. Prints the resolved path; used by both `sync` and `start`.
 assert_clone(){
   local raw="$1" real
-  real=$(readlink -m -- "$raw" 2>/dev/null)
+  # Resolution has to be portable: macOS ships BSD readlink, which has no -m
+  # (and no --), so `readlink -m` fails on every macOS path and the guard would
+  # refuse everything. node is already a hard dependency, and it gives us both
+  # halves: lexical .. normalisation always, plus symlink resolution when the
+  # path exists (a first sync names a directory that does not exist yet).
+  real=$(node -e '
+    const p = require("path"), f = require("fs");
+    let x = p.resolve(process.argv[1]);
+    try { x = f.realpathSync(x); } catch {}
+    process.stdout.write(x);
+  ' "$raw" 2>/dev/null)
   [ -n "$real" ] || { echo "cannot resolve profile path '$raw'" >&2; exit 1; }
   case "$real" in
     "$HOME"|/|/home|/root|/etc|/usr|/var)
       echo "refusing to touch '$real'." >&2; exit 1 ;;
   esac
+  # Anchored to the roots gaze actually clones into. A bare */gaze-auth match
+  # would accept /tmp/gaze-auth or /etc/gaze-auth -- directories that have
+  # nothing to do with this tool but would still be handed to `rm -rf`.
+  # In a `case` glob, * spans slashes, so the deep snap paths match.
   case "$real" in
-    "$CLONES"/?*|*/gaze-auth) ;;
+    "$CLONES"/?*)                ;;
+    "$HOME"/snap/*/gaze-auth)    ;;
     *) echo "refusing to touch '$real': not a gaze clone directory." >&2
-       echo "set GAZE_PROFILE to a path ending in /gaze-auth instead." >&2
+       echo "gaze only ever replaces its own clone, under:" >&2
+       echo "  $CLONES/<browser>" >&2
+       echo "  \$HOME/snap/<pkg>/.../gaze-auth" >&2
        exit 1 ;;
   esac
   printf '%s\n' "$real"
 }
+
 
 live_of(){ case "$1" in *PROFILES_INI) resolve_ini "$1" ;; *) echo "$1" ;; esac; }
 
