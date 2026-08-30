@@ -1,0 +1,21 @@
+{
+  "name": "gaze",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Drive a real, visible browser that is already logged in. CDP for Chromium, WebDriver BiDi for Firefox.",
+  "license": "MPL-2.0",
+  "bin": {
+    "gaze": "bin/gaze",
+    "gaze-mcp": "mcp.mjs"
+  },
+  "scripts": {
+    "test": "node test/selftest.mjs",
+    "test:firefox": "node test/firefox-selftest.mjs",
+    "test:mcp": "node test/mcp-selftest.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "patchright": "^1.62.2",
+    "playwright": "^1.62.1"
+  }
+}
