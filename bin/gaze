@@ -83,6 +83,9 @@ resolve(){
   if [ -n "$want" ]; then
     row=$(row_for "$want")
     [ -z "$row" ] && { echo "unknown browser '$want'. try: gaze browsers" >&2; exit 2; }
+    # Match the automatic path, which skips browsers that are not installed.
+    bin=$(echo "$row" | cut -d'|' -f2)
+    [ -x "$bin" ] || { echo "'$want' is not installed at $bin. try: gaze browsers" >&2; exit 2; }
     echo "$row"; return
   fi
   while IFS= read -r row; do
@@ -166,9 +169,35 @@ case "${1:-}" in
       echo "run:  gaze sync     # close $NAME first"
       exit 1
     fi
+
+    # A browser that dies uncleanly leaves its profile lock behind. The next
+    # launch then opens the debug port, fails the ProcessSingleton check a
+    # moment later, and aborts -- so `start` polls the port, sees it, reports
+    # "up", and the browser is gone seconds afterwards. That looks exactly like
+    # a browser that randomly dies, and it is the single most confusing failure
+    # this tool has. Clear the lock, but ONLY when nothing is using the profile.
+    if [ "$FAMILY" = firefox ]; then inuse="--profile $AUTH"; else inuse="--user-data-dir=$AUTH"; fi
+    if pgrep -f -- "$inuse" >/dev/null 2>&1; then
+      echo "a browser is already using $AUTH."
+      echo "close it, or run: gaze stop"
+      exit 1
+    fi
+    stale=""
+    if [ "$FAMILY" = firefox ]; then
+      for f in lock .parentlock; do
+        [ -e "$AUTH/$f" ] && { rm -f "$AUTH/$f" && stale="yes"; }
+      done
+    else
+      for f in SingletonLock SingletonCookie SingletonSocket; do
+        [ -e "$AUTH/$f" ] && { rm -f "$AUTH/$f" && stale="yes"; }
+      done
+    fi
+    [ -n "$stale" ] && echo "cleared a stale profile lock from a previous run"
+
     mkdir -p "$D"
     if [ "$FAMILY" = firefox ]; then
       setsid "$BIN" --profile "$AUTH" --no-remote \
+        --class gaze \
         ${HEADLESS:+--headless} \
         --remote-debugging-port="$PORT" \
         about:blank >"$D/browser.log" 2>&1 < /dev/null &
@@ -176,7 +205,10 @@ case "${1:-}" in
       if [ ! -f "$AUTH/Default/Cookies" ]; then
         echo "cloned profile at $AUTH has no cookies. run: gaze sync"; exit 1
       fi
+      # --class sets WM_CLASS, so the automation window gets its own taskbar
+      # slot and icon instead of stacking under the everyday browser's.
       setsid "$BIN" --user-data-dir="$AUTH" \
+        --class=gaze \
         ${HEADLESS:+--headless=new} \
         --remote-debugging-port="$PORT" --no-first-run --no-default-browser-check \
         --disable-blink-features=AutomationControlled --start-maximized \
@@ -186,6 +218,38 @@ case "${1:-}" in
       echo "up on :$PORT ($NAME, $FAMILY${HEADLESS:+, headless})"; exit 0; }; done
     echo "failed to start; see $D/browser.log"; exit 1 ;;
 
+  icon)
+    # The window class alone separates it in the taskbar; a matching .desktop
+    # entry is what gives that slot the gaze icon instead of a blank one.
+    apps="$HOME/.local/share/applications"
+    icons="$HOME/.local/share/icons/hicolor"
+    mkdir -p "$apps" || { echo "cannot write $apps"; exit 1; }
+    installed=0
+    for sz in 16 32 48 64 128 256; do
+      if [ -f "$D/docs/icon-$sz.png" ]; then
+        mkdir -p "$icons/${sz}x${sz}/apps"
+        cp "$D/docs/icon-$sz.png" "$icons/${sz}x${sz}/apps/gaze.png" && installed=$((installed+1))
+      fi
+    done
+    [ "$installed" -gt 0 ] || { echo "no icons found under $D/docs"; exit 1; }
+    cat > "$apps/gaze.desktop" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=gaze
+GenericName=Automated browser
+Comment=A real browser, already logged in
+Icon=gaze
+Exec=$SELF start
+Terminal=false
+Categories=Development;WebBrowser;
+StartupWMClass=gaze
+DESKTOP
+    update-desktop-database "$apps" >/dev/null 2>&1
+    gtk-update-icon-cache -f -t "$icons" >/dev/null 2>&1
+    echo "installed $installed icon size(s) and $apps/gaze.desktop"
+    echo "the window class only changes on a fresh launch: gaze stop && gaze start"
+    ;;
+
   stop)   bash "$D/killauto.sh" "$PORT" ;;
   status) up && { curl -s "http://127.0.0.1:$PORT/json/version" | head -c 200; echo; } \
               || echo "not running" ;;
@@ -194,8 +258,18 @@ case "${1:-}" in
     # Refresh stored logins from the everyday profile.
     # Close that browser first, or the copy may catch a half-written database.
     [ -d "$LIVE" ] || { echo "no $NAME profile at $LIVE"; exit 1; }
+    # GAZE_PROFILE is an operator-supplied path that lands in `rm -rf`. A typo
+    # like GAZE_PROFILE=$HOME would otherwise wipe the home directory, so refuse
+    # anything that is not recognisably a gaze clone.
+    case "$AUTH" in
+      "$CLONES"/?*|*/gaze-auth) : ;;
+      *) echo "refusing to wipe '$AUTH': not a gaze clone directory."
+         echo "set GAZE_PROFILE to a path ending in /gaze-auth instead."
+         exit 1 ;;
+    esac
     bash "$D/killauto.sh" "$PORT" >/dev/null 2>&1; sleep 2
-    rm -rf "$AUTH"; mkdir -p "$AUTH"
+    rm -rf "$AUTH"   || { echo "could not clear $AUTH"; exit 1; }
+    mkdir -p "$AUTH" || { echo "could not create $AUTH"; exit 1; }
     if [ "$FAMILY" = firefox ]; then
       # Firefox keeps sessions in a handful of files; copy the profile wholesale.
       cp -r "$LIVE/." "$AUTH/" 2>/dev/null
@@ -212,19 +286,33 @@ case "${1:-}" in
 
   doctor)
     ok=0; bad=0
-    chk(){ if eval "$2" >/dev/null 2>&1; then echo "  ok    $1"; ok=$((ok+1));
-           else echo "  FAIL  $1 -- $3"; bad=$((bad+1)); fi; }
+    # $1 label, $2 op, $3 operand, $4 hint. The operand is NEVER interpolated
+    # into a string that gets eval'd: a profile path containing a quote used to
+    # be enough to execute arbitrary commands here.
+    chk(){
+      local good=1
+      case "$2" in
+        -x)  [ -x "$3" ] || good=0 ;;
+        -d)  [ -d "$3" ] || good=0 ;;
+        -f)  [ -f "$3" ] || good=0 ;;
+        -n)  [ -n "$3" ] || good=0 ;;
+        cmd) command -v "$3" >/dev/null 2>&1 || good=0 ;;
+        *)   good=0 ;;
+      esac
+      if [ "$good" = 1 ]; then echo "  ok    $1"; ok=$((ok+1))
+      else echo "  FAIL  $1 -- $4"; bad=$((bad+1)); fi
+    }
     echo "gaze doctor"
     echo "  browser: $NAME ($FAMILY, $([ "$FAMILY" = firefox ] && echo BiDi || echo CDP))"
     echo "  binary:  $BIN"
-    chk "browser binary"       "[ -x '$BIN' ]"                       "$NAME is not installed"
-    chk "node"                 "command -v node"                     "node not on PATH"
-    chk "backend present"      "[ -f '$BACKEND' ]"                   "missing $BACKEND"
+    chk "browser binary"         -x  "$BIN"                        "$NAME is not installed"
+    chk "node"                   cmd node                           "node not on PATH"
+    chk "backend present"        -f  "$BACKEND"                     "missing $BACKEND"
     [ "$FAMILY" = chromium ] && \
-      chk "playwright installed" "[ -d '$D/node_modules/playwright' ]" "run: (cd $D && npm i)"
-    chk "DISPLAY set ($DISPLAY)" "[ -n '$DISPLAY' ]"                 "no X display; a visible browser cannot start"
-    chk "everyday profile"     "[ -d '$LIVE' ]"                      "cannot find $NAME to sync from"
-    chk "cloned profile"       "[ -d '$AUTH' ]"                      "run: gaze sync"
+      chk "playwright installed" -d  "$D/node_modules/playwright"   "run: (cd $D && npm i)"
+    chk "DISPLAY set ($DISPLAY)" -n  "$DISPLAY"                      "no X display; a visible browser cannot start"
+    chk "everyday profile"       -d  "$LIVE"                         "cannot find $NAME to sync from"
+    chk "cloned profile"         -d  "$AUTH"                         "run: gaze sync"
     if up; then echo "  ok    debug port :$PORT is live"; ok=$((ok+1))
     else echo "  --    not running (start it with: gaze start)"; fi
     if [ -d "$AUTH" ]; then

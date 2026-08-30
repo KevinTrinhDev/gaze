@@ -12,7 +12,9 @@
     "test": "node test/selftest.mjs",
     "test:firefox": "node test/firefox-selftest.mjs",
     "test:mcp": "node test/mcp-selftest.mjs",
-    "demo": "node demo/record-demo.mjs"
+    "demo": "node demo/record-demo.mjs",
+    "test:launcher": "node test/launcher-selftest.mjs",
+    "test:all": "node test/selftest.mjs && node test/launcher-selftest.mjs && node test/firefox-selftest.mjs && node test/mcp-selftest.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

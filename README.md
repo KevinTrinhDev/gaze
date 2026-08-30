@@ -114,6 +114,7 @@ gaze version
 |---|---|
 | `start` `stop` `status` `sync` | run the browser, refresh logins |
 | `doctor` `browsers` `version` `update` | diagnose, list browsers, update |
+| `icon` | give the automation window its own taskbar icon |
 | `goto` `text` `html` | navigate and read |
 | `map` | interactive elements, each with a reusable selector |
 | `scrape` `links` `table` | extract structured data |
@@ -226,7 +227,17 @@ to a callback URL. `gaze` flagged it and carried on. Detail in
 <br>
 
 ```bash
+npm run test:all
+```
+
+Or one suite at a time:
+
+```bash
 npm test
+```
+
+```bash
+npm run test:launcher
 ```
 
 ```bash
