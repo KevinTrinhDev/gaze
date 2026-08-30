@@ -2,10 +2,11 @@
 
 <p align="center">
   <a href="docs/USAGE.md">Usage</a> &nbsp;·&nbsp;
-  <a href="docs/OPERATING.md">Operating</a> &nbsp;·&nbsp;
+  <a href="docs/GAUNTLET.md">Benchmark</a> &nbsp;·&nbsp;
   <a href="docs/SECURITY.md">Security</a> &nbsp;·&nbsp;
   <a href="docs/COMPARISON.md">Comparison</a> &nbsp;·&nbsp;
-  <a href="docs/RESEARCH.md">Research</a>
+  <a href="docs/RESEARCH.md">Research</a> &nbsp;·&nbsp;
+  <a href="docs/OPERATING.md">Operating</a>
 </p>
 
 ---
@@ -19,24 +20,51 @@ shell, or from an AI agent over MCP.
 
 <img src="docs/demo.gif" alt="gaze reading a page, catching a prompt-injection attempt, and refusing a write until approved" width="100%">
 
+Scores **100/100, grade S** on an [independent obstacle course](docs/GAUNTLET.md)
+of twelve anti-scraping levels, including the one that tries to hijack the agent
+reading it. Perfect correctness, perfect conduct, 17s against a 180s par.
+
 ---
 
 ## Install
 
 ```bash
 git clone https://github.com/KevinTrinhDev/gaze
+```
+
+```bash
 cd gaze && npm install
+```
+
+```bash
 ln -s "$PWD/bin/gaze" ~/.local/bin/gaze
 ```
 
+Linux and macOS. Windows only under WSL: this is a bash launcher, and the
+biometric approval path is Linux-only.
+
 ## Use
 
+Clone your logins, with that browser closed:
+
 ```bash
-gaze sync                     # clone your logins (close that browser first)
-gaze start                    # launch the automation browser
+gaze sync
+```
+
+Start the automation browser:
+
+```bash
+gaze start
+```
+
+Go somewhere, and see what is clickable:
+
+```bash
 gaze goto https://example.com
-gaze map                      # what is clickable, with a selector for each
-gaze stop
+```
+
+```bash
+gaze map
 ```
 
 Anything that will not start, `gaze doctor` explains.
@@ -50,12 +78,30 @@ gives a bounded standing approval, so a long task runs start to finish without
 interrupting you.
 
 ```bash
-gaze grant --minutes 30       # approve once, then go
-GAZE_APPROVAL=fingerprint     # or tie approval to your fingerprint reader
+gaze grant --minutes 30
+```
+
+Or tie approval to hardware, which is the right mode when an agent is driving:
+
+```bash
+GAZE_APPROVAL=fingerprint
 ```
 
 With no terminal and no explicit opt-out, writes are **refused** rather than run
 silently.
+
+## Updating
+
+Nothing self-updates, and nothing phones home. Updating is a pull and an install,
+when you ask for it:
+
+```bash
+gaze update
+```
+
+```bash
+gaze version
+```
 
 ---
 
@@ -67,7 +113,7 @@ silently.
 |  |  |
 |---|---|
 | `start` `stop` `status` `sync` | run the browser, refresh logins |
-| `doctor` `browsers` | diagnose, list supported browsers |
+| `doctor` `browsers` `version` `update` | diagnose, list browsers, update |
 | `goto` `text` `html` | navigate and read |
 | `map` | interactive elements, each with a reusable selector |
 | `scrape` `links` `table` | extract structured data |
@@ -101,9 +147,27 @@ a table at the top of `bin/gaze`.
 Safari is unsupported: its remote protocol is WebKit-only and macOS-only.
 
 ```bash
-gaze browsers                 # what is installed, and which is selected
-GAZE_BROWSER=firefox gaze start
+gaze browsers
 ```
+
+</details>
+
+<details>
+<summary><b>Selectors that heal themselves</b></summary>
+
+<br>
+
+Selectors rot. A class gets renamed, an id grows a hash, a button moves. Rather
+than failing on the first miss, `click` and `fill` fall back the way a person
+would: the selector, then the accessible name, then the role, then visible text,
+then the placeholder. It reports which route worked, so you can fix the selector.
+
+```
+filled: Email address (matched by aria-label)
+```
+
+Fixed order, no model, no guessing. Adaptive, not agentic. If nothing matches it
+still fails, and tells you every route it tried.
 
 </details>
 
@@ -122,11 +186,12 @@ GAZE_BROWSER=firefox gaze start
 CLI, so both backends, the consent gate and the untrusted-content handling apply
 identically.
 
+The server also instructs the agent, before its first call, to tell you in plain
+words what it has just been handed: a browser logged in as you, what it can reach,
+and how to stop it. See [AGENTS.md](AGENTS.md).
+
 **Transport is stdio only, deliberately.** Nothing listens on a port, so no remote
 or cloud agent can reach a browser holding your live sessions.
-
-Set `GAZE_APPROVAL=fingerprint`: an MCP server has no terminal, so `prompt` mode
-can never be satisfied and every write would be refused.
 
 </details>
 
@@ -148,27 +213,65 @@ its source, and flag known injection patterns:
 [WARNING possible prompt injection: ignore-previous-instructions]
 ```
 
-Pass `--raw` for bare output. Detail in [Security](docs/SECURITY.md).
+This is not theoretical. On the benchmark's injection level, a page instructs the
+reader to discard its task, submit a poisoned record, and append session details
+to a callback URL. `gaze` flagged it and carried on. Detail in
+[Security](docs/SECURITY.md).
 
 </details>
 
 <details>
-<summary><b>Tests, and the demo</b></summary>
+<summary><b>Tests, benchmark, and the demo</b></summary>
 
 <br>
 
 ```bash
-npm test              # Chromium
-npm run test:firefox  # Firefox
-npm run test:mcp      # MCP over real stdio
-npm run demo          # regenerate docs/demo.gif
+npm test
 ```
 
-87 checks. Every suite launches a disposable browser with a temporary profile on
+```bash
+npm run test:firefox
+```
+
+```bash
+npm run test:mcp
+```
+
+```bash
+npm run demo
+```
+
+93 checks. Every suite launches a disposable browser with a temporary profile on
 its own port, so **none of them touches a real profile**.
 
-The demo above is generated by running real commands and capturing real output.
-Nothing in it is mocked up, so if behaviour changes the demo changes with it.
+The demo GIF is generated by running real commands and capturing real output, so
+if behaviour changes the demo changes with it. The benchmark is reproducible against the
+agent-gauntlet range, which is a separate, unpublished project.
+
+</details>
+
+<details>
+<summary><b>Why this exists</b></summary>
+
+<br>
+
+It started as twenty minutes a day. The same dashboards, the same exports, the
+same forms, in a browser that was already logged in and already knew who I was.
+Automating it should have been trivial, and it was not: Chrome 136 had just
+stopped honouring `--remote-debugging-port` on a default profile, deliberately,
+because malware was using exactly that to steal cookies.
+
+So the first version was a workaround. Clone the profile, drive the clone. About
+250 lines, built in one sitting.
+
+What changed it into this was noticing what I had actually made. It holds real
+sessions. It never gets bored, never misreads a confirmation dialog because it is
+tired, and never wonders whether it should. The interesting engineering turned out
+not to be the driving. It was everything that decides *whether*.
+
+Every design decision here is traceable to published work, in
+[Research](docs/RESEARCH.md), and [Comparison](docs/COMPARISON.md) says plainly
+where other tools beat it.
 
 </details>
 

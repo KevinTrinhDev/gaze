@@ -53,6 +53,50 @@ function guard(url, what) {
     `it never drives a vault's own web UI`);
 }
 
+// Find an element, and keep trying sensible alternatives before giving up.
+//
+// Selectors rot: a class gets renamed, an id gains a hash suffix, a button moves.
+// Rather than failing on the first miss, fall back the way a person would: try
+// the selector, then the accessible name, then visible text, then a loose match
+// against anything interactive. This is adaptive, not agentic. There is no model
+// here, the order is fixed, and it reports which route worked so a caller can
+// update its selector.
+async function locate(p, sel, { text = false, timeout = 8000 } = {}) {
+  const attempts = text
+    ? [['text', () => p.getByText(sel, { exact: false }).first()]]
+    : [
+        ['selector',   () => p.locator(sel).first()],
+        ['aria-label', () => p.getByLabel(sel, { exact: false }).first()],
+        ['role/name',  () => p.getByRole('button', { name: sel }).first()],
+        ['text',       () => p.getByText(sel, { exact: false }).first()],
+        ['placeholder',() => p.getByPlaceholder(sel, { exact: false }).first()],
+      ];
+  const errors = [];
+  for (const [how, build] of attempts) {
+    try {
+      const loc = build();
+      await loc.waitFor({ state: 'visible', timeout: Math.max(1200, timeout / attempts.length) });
+      return { loc, how };
+    } catch (e) { errors.push(`${how}: ${String(e.message).split('\n')[0]}`); }
+  }
+  throw new Error(`no element matched "${sel}"\n  tried ${errors.length} route(s): ` +
+                  attempts.map(a => a[0]).join(', '));
+}
+
+// One retry on a transient failure. Pages navigate mid-action, elements detach,
+// animations move things. A single quick retry fixes most of it and never hides
+// a real failure, because the second error is the one reported.
+async function withRetry(fn, label) {
+  try { return await fn(); }
+  catch (first) {
+    if (/detached|not attached|Execution context|navigation/i.test(first.message)) {
+      await new Promise(r => setTimeout(r, 600));
+      return fn();
+    }
+    throw first;
+  }
+}
+
 // Compact interactive-element map. Hides page chrome by default so main content
 // is not crowded out, walks open shadow roots, emits a reusable selector.
 const collect = (includeChrome) => {
@@ -342,18 +386,21 @@ async function dispatch(ctx, argv) {
     case 'click': {
       const p = pick(ctx, flag('tab'));
       const sel = positional[0];
-      const loc = has('text') ? p.getByText(sel, { exact: false }).first() : p.locator(sel).first();
-      await loc.click({ timeout: Number(flag('timeout', 15000)) });
+      const { loc, how } = await withRetry(
+        () => locate(p, sel, { text: has('text'), timeout: Number(flag('timeout', 15000)) }));
+      await withRetry(() => loc.click({ timeout: Number(flag('timeout', 15000)) }));
       await p.waitForTimeout(Number(flag('wait', 1200)));
-      console.log('clicked:', sel, '| now:', p.url());
+      console.log(`clicked: ${sel}${how === 'selector' ? '' : ` (matched by ${how})`} | now: ${p.url()}`);
       break;
     }
     case 'fill': {
       const p = pick(ctx, flag('tab'));
       const [sel, val] = positional;
-      await p.fill(sel, val, { timeout: Number(flag('timeout', 15000)) });
+      const { loc, how } = await withRetry(
+        () => locate(p, sel, { timeout: Number(flag('timeout', 15000)) }));
+      await withRetry(() => loc.fill(val, { timeout: Number(flag('timeout', 15000)) }));
       if (has('enter')) { await p.keyboard.press('Enter'); await p.waitForTimeout(2000); }
-      console.log('filled:', sel);
+      console.log(`filled: ${sel}${how === 'selector' ? '' : ` (matched by ${how})`}`);
       break;
     }
     case 'press': {

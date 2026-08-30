@@ -22,7 +22,30 @@ export GAZE_PORT="$PORT"
 # live there too. Everything else clones into ~/.local/share/gaze/profiles.
 CLONES="$HOME/.local/share/gaze/profiles"
 FF="$HOME/.mozilla/firefox"
-BROWSERS="
+
+# Browser locations differ per OS, so the table is chosen per OS rather than
+# guessed. Windows is NOT supported: this is a bash launcher that also assumes
+# POSIX paths, and the biometric approval path is Linux-only. Under WSL it works
+# as Linux.
+case "$(uname -s)" in
+  Darwin)
+    APP="/Applications"
+    SUP="$HOME/Library/Application Support"
+    CLONES="$HOME/Library/Application Support/gaze/profiles"
+    FF="$SUP/Firefox/Profiles"
+    BROWSERS="
+brave|$APP/Brave Browser.app/Contents/MacOS/Brave Browser|$SUP/BraveSoftware/Brave-Browser|$CLONES/brave|chromium
+chrome|$APP/Google Chrome.app/Contents/MacOS/Google Chrome|$SUP/Google/Chrome|$CLONES/chrome|chromium
+chromium|$APP/Chromium.app/Contents/MacOS/Chromium|$SUP/Chromium|$CLONES/chromium|chromium
+edge|$APP/Microsoft Edge.app/Contents/MacOS/Microsoft Edge|$SUP/Microsoft Edge|$CLONES/edge|chromium
+vivaldi|$APP/Vivaldi.app/Contents/MacOS/Vivaldi|$SUP/Vivaldi|$CLONES/vivaldi|chromium
+firefox|$APP/Firefox.app/Contents/MacOS/firefox|$SUP/Firefox/PROFILES_INI|$CLONES/firefox|firefox
+"
+    ;;
+  *)
+    # Snap builds can only read profiles under ~/snap/<pkg>/, so their clone must
+    # live there too. Everything else clones into ~/.local/share/gaze/profiles.
+    BROWSERS="
 brave-snap|/snap/bin/brave|$HOME/snap/brave/current/.config/BraveSoftware/Brave-Browser|$HOME/snap/brave/current/.config/BraveSoftware/gaze-auth|chromium
 brave|/usr/bin/brave-browser|$HOME/.config/BraveSoftware/Brave-Browser|$CLONES/brave|chromium
 chrome|/usr/bin/google-chrome|$HOME/.config/google-chrome|$CLONES/chrome|chromium
@@ -35,6 +58,8 @@ basilisk|$HOME/.local/opt/firefox-devedition/firefox|$FF/basilisk-dev|$CLONES/ba
 firefox|/usr/bin/firefox|$FF/PROFILES_INI|$CLONES/firefox|firefox
 firefox-snap|/snap/bin/firefox|$HOME/snap/firefox/common/.mozilla/firefox/PROFILES_INI|$HOME/snap/firefox/common/gaze-auth|firefox
 "
+    ;;
+esac
 
 # Firefox keeps its profiles in named directories listed in profiles.ini, so the
 # "everyday profile" has to be looked up rather than hardcoded.
@@ -89,7 +114,27 @@ else
   BACKEND="$D/gaze.mjs"
 fi
 
+VERSION="1.0.0"
+
 case "${1:-}" in
+  version|--version|-v)
+    rev=$(git -C "$D" rev-parse --short HEAD 2>/dev/null)
+    echo "gaze $VERSION${rev:+ ($rev)}"
+    exit 0 ;;
+
+  update)
+    # Updating is a git pull plus a dependency install. Nothing self-modifies,
+    # nothing phones home, and nothing updates without you asking.
+    if [ ! -d "$D/.git" ]; then
+      echo "not a git checkout: update it however you installed it"; exit 1
+    fi
+    echo "current: $(git -C "$D" rev-parse --short HEAD)"
+    git -C "$D" pull --ff-only || { echo "pull failed; resolve it by hand"; exit 1; }
+    (cd "$D" && npm install --silent) || exit 1
+    echo "now:     $(git -C "$D" rev-parse --short HEAD)"
+    echo "run 'gaze doctor' to confirm, and 'gaze sync' if the profile layout changed."
+    exit 0 ;;
+
   browsers)
     printf '%-15s %-9s %-40s %s\n' BROWSER DRIVER BINARY STATUS
     while IFS= read -r row; do

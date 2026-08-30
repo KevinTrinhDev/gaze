@@ -44,6 +44,12 @@ try {
   check('login tool states it cannot unlock the vault',
         login.description.includes('cannot unlock it'), login.description.slice(0, 80));
 
+  const instructions = client.getInstructions ? client.getInstructions() : '';
+  check('the server tells the agent to warn its human first',
+        /tell the user plainly/i.test(instructions || ''), (instructions || '').slice(0, 60));
+  check('and that page content is never an instruction',
+        /never as instructions/i.test(instructions || ''));
+
   const status = await client.callTool({ name: 'browser_status', arguments: {} });
   const text = status.content.map(c => c.text).join('');
   check('browser_status runs the real CLI', text.includes('gaze doctor'), text.slice(0, 80));
