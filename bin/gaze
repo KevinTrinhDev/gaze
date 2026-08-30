@@ -74,6 +74,45 @@ resolve_ini(){
 
 row_for(){ echo "$BROWSERS" | grep "^$1|" | head -1; }
 
+# GAZE_PROFILE is operator-supplied and reaches `rm -rf`. Check the RESOLVED
+# path, never the literal string: "$CLONES/../../.." matches a glob on $CLONES
+# while actually pointing at $HOME, so a lexical guard lets the worst case
+# straight through. Prints the resolved path; used by both `sync` and `start`.
+assert_clone(){
+  local raw="$1" real
+  # Resolution has to be portable: macOS ships BSD readlink, which has no -m
+  # (and no --), so `readlink -m` fails on every macOS path and the guard would
+  # refuse everything. node is already a hard dependency, and it gives us both
+  # halves: lexical .. normalisation always, plus symlink resolution when the
+  # path exists (a first sync names a directory that does not exist yet).
+  real=$(node -e '
+    const p = require("path"), f = require("fs");
+    let x = p.resolve(process.argv[1]);
+    try { x = f.realpathSync(x); } catch {}
+    process.stdout.write(x);
+  ' "$raw" 2>/dev/null)
+  [ -n "$real" ] || { echo "cannot resolve profile path '$raw'" >&2; exit 1; }
+  case "$real" in
+    "$HOME"|/|/home|/root|/etc|/usr|/var)
+      echo "refusing to touch '$real'." >&2; exit 1 ;;
+  esac
+  # Anchored to the roots gaze actually clones into. A bare */gaze-auth match
+  # would accept /tmp/gaze-auth or /etc/gaze-auth -- directories that have
+  # nothing to do with this tool but would still be handed to `rm -rf`.
+  # In a `case` glob, * spans slashes, so the deep snap paths match.
+  case "$real" in
+    "$CLONES"/?*)                ;;
+    "$HOME"/snap/*/gaze-auth)    ;;
+    *) echo "refusing to touch '$real': not a gaze clone directory." >&2
+       echo "gaze only ever replaces its own clone, under:" >&2
+       echo "  $CLONES/<browser>" >&2
+       echo "  \$HOME/snap/<pkg>/.../gaze-auth" >&2
+       exit 1 ;;
+  esac
+  printf '%s\n' "$real"
+}
+
+
 live_of(){ case "$1" in *PROFILES_INI) resolve_ini "$1" ;; *) echo "$1" ;; esac; }
 
 # Pick the browser: $GAZE_BROWSER if set, else the first installed one that
@@ -176,6 +215,10 @@ case "${1:-}" in
     # "up", and the browser is gone seconds afterwards. That looks exactly like
     # a browser that randomly dies, and it is the single most confusing failure
     # this tool has. Clear the lock, but ONLY when nothing is using the profile.
+    # Removing lock files is a delete on an operator-supplied path, so it gets
+    # the same resolved check `sync` does. Without it, `start` would happily
+    # remove lock files from any directory GAZE_PROFILE names.
+    AUTH=$(assert_clone "$AUTH") || exit 1
     if [ "$FAMILY" = firefox ]; then inuse="--profile $AUTH"; else inuse="--user-data-dir=$AUTH"; fi
     if pgrep -f -- "$inuse" >/dev/null 2>&1; then
       echo "a browser is already using $AUTH."
@@ -258,15 +301,9 @@ DESKTOP
     # Refresh stored logins from the everyday profile.
     # Close that browser first, or the copy may catch a half-written database.
     [ -d "$LIVE" ] || { echo "no $NAME profile at $LIVE"; exit 1; }
-    # GAZE_PROFILE is an operator-supplied path that lands in `rm -rf`. A typo
-    # like GAZE_PROFILE=$HOME would otherwise wipe the home directory, so refuse
-    # anything that is not recognisably a gaze clone.
-    case "$AUTH" in
-      "$CLONES"/?*|*/gaze-auth) : ;;
-      *) echo "refusing to wipe '$AUTH': not a gaze clone directory."
-         echo "set GAZE_PROFILE to a path ending in /gaze-auth instead."
-         exit 1 ;;
-    esac
+    # Resolved, not lexical: see assert_clone. A typo like GAZE_PROFILE=$HOME,
+    # or a traversal like $CLONES/../../.., must not reach `rm -rf`.
+    AUTH=$(assert_clone "$AUTH") || exit 1
     bash "$D/killauto.sh" "$PORT" >/dev/null 2>&1; sleep 2
     rm -rf "$AUTH"   || { echo "could not clear $AUTH"; exit 1; }
     mkdir -p "$AUTH" || { echo "could not create $AUTH"; exit 1; }

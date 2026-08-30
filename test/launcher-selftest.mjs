@@ -7,7 +7,7 @@
 //
 // Nothing here starts a browser or touches a real profile.
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, existsSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, writeFileSync, mkdirSync, readFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -61,7 +61,7 @@ try {
   writeFileSync(join(precious, 'keep.txt'), 'do not delete me');
   const refused = run({ GAZE_PROFILE: precious }, 'sync');
   check('sync refuses a path that is not a gaze clone',
-        refused.code !== 0 && refused.out.includes('refusing to wipe'), `exit ${refused.code}`);
+        refused.code !== 0 && /refusing to (wipe|touch)/.test(refused.out), `exit ${refused.code}`);
   check('sync left the directory untouched', existsSync(join(precious, 'keep.txt')));
 
   // ---- an explicitly named browser that is not installed fails fast --------
@@ -109,7 +109,11 @@ try {
   // later, and aborts -- so `start` reports "up" and the browser vanishes
   // seconds afterwards. Clearing the lock happens before the cookie check, so
   // this exercises it without ever launching a browser.
-  const staleProfile = join(scratch, 'gaze-auth');
+  // Must live under the real clone root: the path guard (correctly) refuses a
+  // scratch directory in /tmp, even one named gaze-auth. This is a throwaway
+  // name no browser in the table uses, and it is removed again below.
+  const staleProfile = join(process.env.HOME, '.local/share/gaze/profiles',
+                            'selftest-stale-lock');
   mkdirSync(staleProfile, { recursive: true });
   writeFileSync(join(staleProfile, 'SingletonLock'), '');
   // A port nothing is on, so this never short-circuits on "already running"
@@ -122,6 +126,70 @@ try {
   // It still refuses to run: the profile has no cookies, so it is not a clone.
   check('a profile with no cookies is still refused',
         stale.code !== 0 && /gaze sync/.test(stale.out), `exit ${stale.code}`);
+  rmSync(staleProfile, { recursive: true, force: true });
+
+  // ---- the path guard, exercised directly -----------------------------------
+  // `sync` and `start` both delete things under GAZE_PROFILE, so the guard that
+  // decides what counts as a clone is the single most dangerous function here.
+  // It is extracted and called directly: driving it through `gaze sync` would
+  // mean actually deleting a real profile to test the accept cases.
+  const guardPath = (path) => {
+    try {
+      return execFileSync('bash', ['-c',
+        `set -uo pipefail
+         CLONES="$HOME/.local/share/gaze/profiles"
+         eval "$(sed -n '/^assert_clone(){/,/^}/p' ${JSON.stringify(GAZE)})"
+         assert_clone ${JSON.stringify(path)}`],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    } catch { return null; }             // refused
+  };
+  const guard = (path) => guardPath(path) !== null;
+  const HOME = process.env.HOME;
+  const CLONES = `${HOME}/.local/share/gaze/profiles`;
+
+  // The traversal that defeats a lexical check: it matches a glob on $CLONES
+  // while resolving to $HOME, which is exactly the case the guard exists for.
+  check('a traversal out of the clone root is refused',
+        !guard(`${CLONES}/../../../..`));
+  check('$HOME itself is refused', !guard(HOME));
+  check('/ is refused', !guard('/'));
+  check('an unrelated directory is refused', !guard('/tmp'));
+  // A bare */gaze-auth match would accept these. They have nothing to do with
+  // gaze, and both would have been handed to `rm -rf`.
+  check('/tmp/gaze-auth is refused', !guard('/tmp/gaze-auth'));
+  check('/etc/gaze-auth is refused', !guard('/etc/gaze-auth'));
+  check('a traversal ending in gaze-auth is refused',
+        !guard(`${CLONES}/../../../../../../tmp/gaze-auth`));
+
+  // ...and every legitimate clone path in the BROWSERS table still works,
+  // including ones that do not exist yet, which is the first-sync case.
+  check('a clone under the clone root is accepted', guard(`${CLONES}/brave`));
+  check('a snap clone is accepted',
+        guard(`${HOME}/snap/brave/current/.config/BraveSoftware/gaze-auth`));
+  check('a clone that does not exist yet is accepted',
+        guard(`${HOME}/snap/chromium/common/gaze-auth`));
+  check('a browser never synced before is accepted', guard(`${CLONES}/vivaldi`));
+
+  // A symlink inside the clone root pointing OUT of it must be refused: this is
+  // the case realpath resolution exists for.
+  const outside = join(scratch, 'outside');
+  mkdirSync(outside, { recursive: true });
+  const linkPath = join(CLONES, 'selftest-escape-link');
+  mkdirSync(CLONES, { recursive: true });
+  rmSync(linkPath, { force: true });
+  symlinkSync(outside, linkPath);
+  check('a symlink out of the clone root is refused', !guard(linkPath));
+
+  // And the subtle one: `link/..` is removed lexically BEFORE symlinks are
+  // resolved, so the guard must hand back a path inside the root -- and that
+  // resolved path, not the raw string, is what reaches `rm -rf`. If a future
+  // change ever passes the raw path through instead, this deletes the wrong
+  // directory, and this check is what catches it.
+  const viaLink = guardPath(`${linkPath}/../not-a-real-clone`);
+  check('a symlink plus .. cannot escape the clone root',
+        viaLink !== null && viaLink.startsWith(CLONES + '/') && !viaLink.includes(outside),
+        String(viaLink));
+  rmSync(linkPath, { force: true });
 
   console.log(`${pass} passed, ${fail} failed`);
 } finally {
