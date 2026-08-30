@@ -114,6 +114,20 @@ try {
   check('login refuses without an operator-unlocked session',
         loginErr.includes('cannot unlock the vault for you'), loginErr.trim().slice(0, 80));
 
+  // ---- self-healing selectors ----
+  const healed = ab('fill', 'Email address', 'healed@example.test');
+  check('a dead CSS selector falls back to the accessible name',
+        healed.includes('matched by'), healed.trim());
+  const healedVal = JSON.parse(ab('eval', 'document.querySelector("input[name=email]").value'));
+  check('the fallback filled the right field', healedVal === 'healed@example.test', String(healedVal));
+  const clicked = ab('click', 'Sign in');
+  check('click falls back too', clicked.includes('clicked:'), clicked.trim().slice(0, 60));
+  let noMatch = '';
+  try { ab('click', '#definitely-not-here'); }
+  catch (e) { noMatch = (e.stdout || '') + (e.stderr || ''); }
+  check('an unmatchable selector still fails, and says what it tried',
+        noMatch.includes('no element matched') && noMatch.includes('tried'), noMatch.trim().slice(0, 70));
+
   // ---- recording ----
   const rec = ab('record', '--seconds', '2', '--fps', '4');
   const recPath = rec.trim().split('\n').pop();
