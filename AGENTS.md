@@ -66,6 +66,22 @@ that keep costing time:
 3. **`sync` copies one profile**, signed into one identity. An account not signed
    into the everyday profile is unreachable, and that is an identity boundary, not
    a UI problem to click through.
+4. **`--headless` is more detectable, not less.** The same URL can load clean in
+   the headed browser and get a press-and-hold in headless. If a site sits behind
+   PerimeterX, DataDome or Cloudflare Bot Management, run headed. Headless is for
+   unattended work on sites that do not care.
+5. **"up on :9225" does not mean it stayed up.** A browser that exits uncleanly
+   leaves `SingletonLock` in the profile. The next launch opens the debug port,
+   fails the ProcessSingleton check a moment later, and aborts -- so `start`
+   polls the port, sees it, and reports success for a browser that is already
+   dying. `start` now clears a stale lock, but if a headed browser still vanishes,
+   check `Default/Preferences`: `exit_type: Normal` with no lock left behind means
+   it shut down gracefully, i.e. something closed the window.
+6. **Google is signed out even when the cookies copy perfectly.** Every Google
+   account reads as signed out in the clone while GitHub, X and LinkedIn stay
+   live. The cookie rows, including the critical auth ones, are byte-identical
+   between the everyday profile and the clone, so this is not a copy problem and
+   re-running `sync` will not fix it.
 
 ## Changing the driver
 
