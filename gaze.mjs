@@ -163,6 +163,12 @@ const CHALLENGE = () => {
     '#challenge-form', '.g-recaptcha', '.h-captcha', '.cf-turnstile',
     // Cloudflare's interstitial, which runs BEFORE any widget is rendered.
     '#cf-challenge-running', '.cf-browser-verification', '#cf-please-wait',
+    // PerimeterX / HUMAN, which serves a press-and-hold instead of a captcha,
+    // and DataDome, which serves its own. Neither looks like reCAPTCHA, so
+    // neither was detected: the page read as ordinary content and got scraped.
+    '#px-captcha', '.px-captcha-container', '[id^="px-captcha"]',
+    '.datadome-captcha', '#datadome-captcha',
+    'iframe[src*="captcha-delivery.com"]', 'iframe[src*="perimeterx"]',
   ];
   // A marker that is not rendered is a leftover, not a live challenge: sites
   // keep the widget container in the DOM after it has already been solved.
@@ -173,8 +179,17 @@ const CHALLENGE = () => {
                   'complete the security check', 'just a moment',
                   'verifying you are human',
                   'needs to review the security of your connection',
-                  'enable javascript and cookies to continue'].find(p => t.includes(p));
-  return { challenged: found.length > 0 || !!phrase, markers: found, phrase: phrase || null };
+                  'enable javascript and cookies to continue',
+                  // PerimeterX's press-and-hold, which carries no captcha widget.
+                  'press & hold', 'press and hold'].find(p => t.includes(p));
+  // A hard block is not a challenge -- there is nothing to solve -- but it is
+  // the other way a page can be worthless while looking like content. Scraping
+  // on through one is how an operator's real IP earns a longer ban.
+  const blocked = ['access to this page has been denied', 'you have been blocked',
+                   'sorry, you have been blocked', 'unusual traffic from your computer',
+                   'why have i been blocked', 'access denied'].find(p => t.includes(p));
+  return { challenged: found.length > 0 || !!phrase, markers: found,
+           phrase: phrase || null, blocked: blocked || null };
 };
 
 // ---- untrusted content -----------------------------------------------------
@@ -568,10 +583,21 @@ async function dispatch(ctx, argv) {
       const p = pick(ctx, flag('tab'));
       const r = await p.evaluate(CHALLENGE);
       if (has('json')) { console.log(JSON.stringify(r, null, 2)); break; }
+      // A block is reported separately from a challenge, because the answer is
+      // the opposite: a challenge wants a human, a block wants you to stop.
+      if (!r.challenged && r.blocked) {
+        console.log('BLOCKED on', p.url());
+        console.log('  text:', r.blocked);
+        console.log('  There is nothing to solve. Stop hitting this host: the');
+        console.log('  address doing it is the operator\'s own.');
+        process.exitCode = 2;
+        break;
+      }
       if (!r.challenged) { console.log('no challenge detected'); break; }
       console.log('CHALLENGE DETECTED on', p.url());
       if (r.markers.length) console.log('  markers:', r.markers.join(', '));
       if (r.phrase) console.log('  text:', r.phrase);
+      if (r.blocked) console.log('  also reads as a block:', r.blocked);
       console.log('  The browser is visible: solve it by hand, then continue.');
       console.log('  Waiting is: gaze wait-human');
       process.exitCode = 2;               // scripts can branch on this

@@ -112,7 +112,9 @@ try {
   const staleProfile = join(scratch, 'gaze-auth');
   mkdirSync(staleProfile, { recursive: true });
   writeFileSync(join(staleProfile, 'SingletonLock'), '');
-  const stale = run({ GAZE_PROFILE: staleProfile }, 'start');
+  // A port nothing is on, so this never short-circuits on "already running"
+  // against a browser the operator happens to have up on the default port.
+  const stale = run({ GAZE_PROFILE: staleProfile, GAZE_PORT: '9247' }, 'start');
   check('start clears a stale profile lock',
         stale.out.includes('cleared a stale profile lock'), stale.out.trim().split('\n')[0]);
   check('the stale lock is actually gone',

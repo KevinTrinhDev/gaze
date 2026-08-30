@@ -267,6 +267,23 @@ try {
         '0' + (statSync(shotPath).mode & 0o777).toString(8));
   rmSync(shotPath, { force: true });
 
+  // A live zillow.com hit returned exactly this and gaze said "no challenge
+  // detected", so the block page would have been scraped as if it were content.
+  ab('goto', url + 'presshold', '--wait', '400');
+  let pxOut = '', pxCode = 0;
+  try { pxOut = ab('challenge'); } catch (e) { pxOut = e.stdout || ''; pxCode = e.status; }
+  check('detects a PerimeterX press-and-hold',
+        pxOut.includes('CHALLENGE DETECTED') && pxCode === 2, pxOut.trim().split('\n')[0]);
+
+  // A block is reported separately: a challenge wants a human, a block wants
+  // you to stop, and continuing is how the operator's own IP earns a ban.
+  ab('goto', url + 'blocked', '--wait', '400');
+  let blOut = '', blCode = 0;
+  try { blOut = ab('challenge'); } catch (e) { blOut = e.stdout || ''; blCode = e.status; }
+  check('reports a hard block, and does not call it a challenge',
+        blOut.includes('BLOCKED') && !blOut.includes('CHALLENGE DETECTED') && blCode === 2,
+        blOut.trim().split('\n')[0]);
+
   // ---- regressions: failures found by stress-testing the real browser -------
   // Each of these was a real defect. They stay here so they cannot come back.
 
