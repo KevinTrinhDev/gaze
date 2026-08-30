@@ -61,7 +61,7 @@ try {
   writeFileSync(join(precious, 'keep.txt'), 'do not delete me');
   const refused = run({ GAZE_PROFILE: precious }, 'sync');
   check('sync refuses a path that is not a gaze clone',
-        refused.code !== 0 && refused.out.includes('refusing to wipe'), `exit ${refused.code}`);
+        refused.code !== 0 && /refusing to (wipe|touch)/.test(refused.out), `exit ${refused.code}`);
   check('sync left the directory untouched', existsSync(join(precious, 'keep.txt')));
 
   // ---- an explicitly named browser that is not installed fails fast --------
@@ -122,6 +122,41 @@ try {
   // It still refuses to run: the profile has no cookies, so it is not a clone.
   check('a profile with no cookies is still refused',
         stale.code !== 0 && /gaze sync/.test(stale.out), `exit ${stale.code}`);
+
+  // ---- the path guard, exercised directly -----------------------------------
+  // `sync` and `start` both delete things under GAZE_PROFILE, so the guard that
+  // decides what counts as a clone is the single most dangerous function here.
+  // It is extracted and called directly: driving it through `gaze sync` would
+  // mean actually deleting a real profile to test the accept cases.
+  const guard = (path) => {
+    try {
+      execFileSync('bash', ['-c',
+        `set -uo pipefail
+         CLONES="$HOME/.local/share/gaze/profiles"
+         eval "$(sed -n '/^assert_clone(){/,/^}/p' ${JSON.stringify(GAZE)})"
+         assert_clone ${JSON.stringify(path)}`],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      return true;                       // accepted
+    } catch { return false; }            // refused
+  };
+  const HOME = process.env.HOME;
+  const CLONES = `${HOME}/.local/share/gaze/profiles`;
+
+  // The traversal that defeats a lexical check: it matches a glob on $CLONES
+  // while resolving to $HOME, which is exactly the case the guard exists for.
+  check('a traversal out of the clone root is refused',
+        !guard(`${CLONES}/../../../..`));
+  check('$HOME itself is refused', !guard(HOME));
+  check('/ is refused', !guard('/'));
+  check('an unrelated directory is refused', !guard('/tmp'));
+
+  // ...and every legitimate clone path in the BROWSERS table still works,
+  // including ones that do not exist yet, which is the first-sync case.
+  check('a clone under the clone root is accepted', guard(`${CLONES}/brave`));
+  check('a snap clone is accepted',
+        guard(`${HOME}/snap/brave/current/.config/BraveSoftware/gaze-auth`));
+  check('a clone that does not exist yet is accepted',
+        guard(`${HOME}/snap/chromium/common/gaze-auth`));
 
   console.log(`${pass} passed, ${fail} failed`);
 } finally {
