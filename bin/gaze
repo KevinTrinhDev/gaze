@@ -169,6 +169,31 @@ case "${1:-}" in
       echo "run:  gaze sync     # close $NAME first"
       exit 1
     fi
+
+    # A browser that dies uncleanly leaves its profile lock behind. The next
+    # launch then opens the debug port, fails the ProcessSingleton check a
+    # moment later, and aborts -- so `start` polls the port, sees it, reports
+    # "up", and the browser is gone seconds afterwards. That looks exactly like
+    # a browser that randomly dies, and it is the single most confusing failure
+    # this tool has. Clear the lock, but ONLY when nothing is using the profile.
+    if [ "$FAMILY" = firefox ]; then inuse="--profile $AUTH"; else inuse="--user-data-dir=$AUTH"; fi
+    if pgrep -f -- "$inuse" >/dev/null 2>&1; then
+      echo "a browser is already using $AUTH."
+      echo "close it, or run: gaze stop"
+      exit 1
+    fi
+    stale=""
+    if [ "$FAMILY" = firefox ]; then
+      for f in lock .parentlock; do
+        [ -e "$AUTH/$f" ] && { rm -f "$AUTH/$f" && stale="yes"; }
+      done
+    else
+      for f in SingletonLock SingletonCookie SingletonSocket; do
+        [ -e "$AUTH/$f" ] && { rm -f "$AUTH/$f" && stale="yes"; }
+      done
+    fi
+    [ -n "$stale" ] && echo "cleared a stale profile lock from a previous run"
+
     mkdir -p "$D"
     if [ "$FAMILY" = firefox ]; then
       setsid "$BIN" --profile "$AUTH" --no-remote \

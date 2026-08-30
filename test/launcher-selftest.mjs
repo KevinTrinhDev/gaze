@@ -103,6 +103,24 @@ try {
         (launcherSrc.match(/--class[= ]gaze/g) || []).length >= 2,
         'chromium and firefox branches must both set it');
 
+  // ---- a stale profile lock must not look like a browser that died ---------
+  // When a browser exits uncleanly it leaves SingletonLock behind. The next
+  // launch opens the debug port, fails the ProcessSingleton check a moment
+  // later, and aborts -- so `start` reports "up" and the browser vanishes
+  // seconds afterwards. Clearing the lock happens before the cookie check, so
+  // this exercises it without ever launching a browser.
+  const staleProfile = join(scratch, 'gaze-auth');
+  mkdirSync(staleProfile, { recursive: true });
+  writeFileSync(join(staleProfile, 'SingletonLock'), '');
+  const stale = run({ GAZE_PROFILE: staleProfile }, 'start');
+  check('start clears a stale profile lock',
+        stale.out.includes('cleared a stale profile lock'), stale.out.trim().split('\n')[0]);
+  check('the stale lock is actually gone',
+        !existsSync(join(staleProfile, 'SingletonLock')));
+  // It still refuses to run: the profile has no cookies, so it is not a clone.
+  check('a profile with no cookies is still refused',
+        stale.code !== 0 && /gaze sync/.test(stale.out), `exit ${stale.code}`);
+
   console.log(`${pass} passed, ${fail} failed`);
 } finally {
   rmSync(scratch, { recursive: true, force: true });
