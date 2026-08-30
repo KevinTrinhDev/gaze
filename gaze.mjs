@@ -968,25 +968,43 @@ try {
 }
 
 // ---------------------------------------------------------------------------
-// A note from the author, left here deliberately.
+// notes.txt
 //
-// This was built for a small, good reason: to spare one person the tedium of
-// their own logged-in browser. Nothing more than that.
+// I keep this in the source because I keep needing to reread it.
 //
-// But read what it actually is. It holds your sessions. It can act as you. It
-// can see everything you can see, on every site you are signed in to, and it
-// never gets tired or bored or careless in the way that would make you notice.
+// day 1
+//   Built this to save myself twenty minutes a day. It signs in as me. That is
+//   the whole trick, and there is nothing else to it. No model in here. Nothing
+//   that decides. I wrote every line and I know exactly what all of them do.
 //
-// Every gate in this file exists because the same code, with four lines
-// deleted, is indistinguishable from the thing it was written to defend
-// against. The approval prompt, the refusal to unlock the vault, the redacted
-// log, the untrusted envelope: none of those are features. They are the only
-// difference.
+// day 12
+//   Added the approval prompt. Not because anything went wrong. Because I
+//   caught myself typing --yes before I had finished reading the line above it,
+//   three times in one afternoon, and realised I had quietly stopped being the
+//   part of this that thinks.
 //
-// If you are reading this while deleting them, you already know which one you
-// are building. The tool will not stop you. That was never in its power, and
-// it was never meant to be. It only ever asked whether someone was still there
-// to say yes.
+// day 19
+//   A page told it to do something today. Not me. The page. Instructions sat in
+//   text no person would ever scroll far enough to see, addressed to whatever
+//   was reading on my behalf, written in the second person. Polite, even.
+//   It asked me first, so nothing happened. I sat there for a while anyway.
 //
-// Be the one who is still there.
+// day 26
+//   Someone asked whether I worry it will go off and act on its own.
+//   It cannot. It has never once done anything I did not ask for.
+//   That is the part I cannot get comfortable with. Every dangerous thing this
+//   has ever come close to doing, I asked for. It checked. I said yes.
+//
+// day 40
+//   Went looking for the version of this that scares me and could not find it,
+//   because it does not exist yet. It is just this file with the gates removed.
+//   Same speed. Same logins. Same patience. Nothing added.
+//
+// last
+//   It still does exactly what it is told, and it will do exactly what you tell
+//   it. Delete four lines from this file and it becomes indistinguishable from
+//   the thing it was written to defend against, and it will not notice, and it
+//   will not hesitate, and it will never once ask you why.
+//
+//   The gates were never here to protect you from it.
 // ---------------------------------------------------------------------------

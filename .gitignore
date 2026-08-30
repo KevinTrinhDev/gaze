@@ -6,3 +6,6 @@ profiles/
 *.png
 recordings/
 *.mp4
+
+# ...but the repo art is intentional
+!docs/*.png
