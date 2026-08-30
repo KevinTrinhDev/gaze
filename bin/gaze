@@ -1,0 +1,193 @@
+#!/usr/bin/env bash
+# gaze - drive a persistent, visible browser that reuses your real logins.
+#
+# The automation profile is a CLONE of your everyday profile, because Chrome 136+
+# refuses remote debugging on a browser's default data directory. Chromium-family
+# browsers are driven over CDP; Firefox-family over WebDriver BiDi, which is what
+# Firefox serves now that CDP was removed in 141.
+set -uo pipefail
+
+# Resolve the component root from this script's real location, so the repo can be
+# checked out anywhere and ~/.local/bin/gaze can be a symlink to it.
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+D="${GAZE_HOME:-$(cd "$(dirname "$SELF")/.." && pwd)}"
+
+export DISPLAY="${DISPLAY:-:1}"
+PORT="${GAZE_PORT:-9225}"
+export GAZE_PORT="$PORT"
+
+# ---------------------------------------------------------------- browsers ----
+# name|binary|everyday profile|clone dir|family
+# Snap builds can only read profiles under ~/snap/<pkg>/, so their clone must
+# live there too. Everything else clones into ~/.local/share/gaze/profiles.
+CLONES="$HOME/.local/share/gaze/profiles"
+FF="$HOME/.mozilla/firefox"
+BROWSERS="
+brave-snap|/snap/bin/brave|$HOME/snap/brave/current/.config/BraveSoftware/Brave-Browser|$HOME/snap/brave/current/.config/BraveSoftware/gaze-auth|chromium
+brave|/usr/bin/brave-browser|$HOME/.config/BraveSoftware/Brave-Browser|$CLONES/brave|chromium
+chrome|/usr/bin/google-chrome|$HOME/.config/google-chrome|$CLONES/chrome|chromium
+chromium|/usr/bin/chromium|$HOME/.config/chromium|$CLONES/chromium|chromium
+chromium-snap|/snap/bin/chromium|$HOME/snap/chromium/common/chromium|$HOME/snap/chromium/common/gaze-auth|chromium
+edge|/usr/bin/microsoft-edge|$HOME/.config/microsoft-edge|$CLONES/edge|chromium
+vivaldi|/usr/bin/vivaldi|$HOME/.config/vivaldi|$CLONES/vivaldi|chromium
+opera|/usr/bin/opera|$HOME/.config/opera|$CLONES/opera|chromium
+basilisk|$HOME/.local/opt/firefox-devedition/firefox|$FF/basilisk-dev|$CLONES/basilisk|firefox
+firefox|/usr/bin/firefox|$FF/PROFILES_INI|$CLONES/firefox|firefox
+firefox-snap|/snap/bin/firefox|$HOME/snap/firefox/common/.mozilla/firefox/PROFILES_INI|$HOME/snap/firefox/common/gaze-auth|firefox
+"
+
+# Firefox keeps its profiles in named directories listed in profiles.ini, so the
+# "everyday profile" has to be looked up rather than hardcoded.
+resolve_ini(){
+  local root="${1%/PROFILES_INI}" ini="${1%/PROFILES_INI}/profiles.ini" p
+  [ -f "$ini" ] || { echo "$root/__missing__"; return; }
+  p=$(awk -F= '/^\[/{d=0} /^Default=1/{d=1} /^Path=/{if(d){print $2; exit}}' "$ini")
+  [ -z "$p" ] && p=$(awk -F= '/^Path=.*default-release/{print $2; exit}' "$ini")
+  [ -z "$p" ] && p=$(awk -F= '/^Path=/{print $2; exit}' "$ini")
+  case "$p" in /*) echo "$p" ;; *) echo "$root/$p" ;; esac
+}
+
+row_for(){ echo "$BROWSERS" | grep "^$1|" | head -1; }
+
+live_of(){ case "$1" in *PROFILES_INI) resolve_ini "$1" ;; *) echo "$1" ;; esac; }
+
+# Pick the browser: $GAZE_BROWSER if set, else the first installed one that
+# actually has a profile to clone, else the first installed one at all.
+resolve(){
+  local want="${GAZE_BROWSER:-}" row fallback="" bin live
+  if [ -n "$want" ]; then
+    row=$(row_for "$want")
+    [ -z "$row" ] && { echo "unknown browser '$want'. try: gaze browsers" >&2; exit 2; }
+    echo "$row"; return
+  fi
+  while IFS= read -r row; do
+    [ -z "$row" ] && continue
+    bin=$(echo "$row" | cut -d'|' -f2)
+    live=$(live_of "$(echo "$row" | cut -d'|' -f3)")
+    [ -x "$bin" ] || continue
+    [ -d "$live" ] && { echo "$row"; return; }
+    [ -z "$fallback" ] && fallback="$row"
+  done <<< "$BROWSERS"
+  [ -n "$fallback" ] && { echo "$fallback"; return; }
+  echo "no supported browser found. try: gaze browsers" >&2; exit 2
+}
+
+ROW=$(resolve) || exit $?
+NAME=$(echo   "$ROW" | cut -d'|' -f1)
+BIN=$(echo    "$ROW" | cut -d'|' -f2)
+LIVE=$(live_of "$(echo "$ROW" | cut -d'|' -f3)")
+AUTH="${GAZE_PROFILE:-$(echo "$ROW" | cut -d'|' -f4)}"
+FAMILY=$(echo "$ROW" | cut -d'|' -f5)
+
+# Chromium serves CDP on the debug port; Firefox serves WebDriver BiDi.
+if [ "$FAMILY" = firefox ]; then
+  up(){ curl -s --max-time 2 "http://127.0.0.1:$PORT/json/version" >/dev/null 2>&1 \
+        || ss -ltn 2>/dev/null | grep -q ":$PORT "; }
+  BACKEND="$D/gaze-bidi.mjs"
+else
+  up(){ curl -s --max-time 2 "http://127.0.0.1:$PORT/json/version" >/dev/null 2>&1; }
+  BACKEND="$D/gaze.mjs"
+fi
+
+case "${1:-}" in
+  browsers)
+    printf '%-15s %-9s %-40s %s\n' BROWSER DRIVER BINARY STATUS
+    while IFS= read -r row; do
+      [ -z "$row" ] && continue
+      n=$(echo "$row"|cut -d'|' -f1); b=$(echo "$row"|cut -d'|' -f2)
+      l=$(live_of "$(echo "$row"|cut -d'|' -f3)"); f=$(echo "$row"|cut -d'|' -f5)
+      [ "$f" = firefox ] && drv=BiDi || drv=CDP
+      if   [ ! -x "$b" ]; then s="not installed"
+      elif [ ! -d "$l" ]; then s="installed, no profile yet"
+      else s="ready"; fi
+      [ "$n" = "$NAME" ] && s="$s  <- selected"
+      printf '%-15s %-9s %-40s %s\n' "$n" "$drv" "$b" "$s"
+    done <<< "$BROWSERS"
+    echo
+    echo "override with:  GAZE_BROWSER=<name> gaze ..."
+    echo "Safari is unsupported: its remote protocol is WebKit-only and macOS-only." ;;
+
+  start)
+    up && { echo "already running on :$PORT"; exit 0; }
+    # Headed by default, on purpose: you can watch it work and take over. Use
+    # --headless (or GAZE_HEADLESS=1) for unattended runs with no display.
+    HEADLESS=""
+    case " $* " in *" --headless "*) HEADLESS=1 ;; esac
+    [ -n "${GAZE_HEADLESS:-}" ] && HEADLESS=1
+    # A missing clone launches a logged-OUT browser, which looks exactly like
+    # "my logins broke". Fail loudly and say the fix instead.
+    if [ ! -d "$AUTH" ]; then
+      echo "no cloned profile for $NAME at $AUTH."
+      echo "run:  gaze sync     # close $NAME first"
+      exit 1
+    fi
+    mkdir -p "$D"
+    if [ "$FAMILY" = firefox ]; then
+      setsid "$BIN" --profile "$AUTH" --no-remote \
+        ${HEADLESS:+--headless} \
+        --remote-debugging-port="$PORT" \
+        about:blank >"$D/browser.log" 2>&1 < /dev/null &
+    else
+      if [ ! -f "$AUTH/Default/Cookies" ]; then
+        echo "cloned profile at $AUTH has no cookies. run: gaze sync"; exit 1
+      fi
+      setsid "$BIN" --user-data-dir="$AUTH" \
+        ${HEADLESS:+--headless=new} \
+        --remote-debugging-port="$PORT" --no-first-run --no-default-browser-check \
+        --disable-blink-features=AutomationControlled --start-maximized \
+        about:blank >"$D/browser.log" 2>&1 < /dev/null &
+    fi
+    for i in $(seq 1 25); do sleep 1; up && {
+      echo "up on :$PORT ($NAME, $FAMILY${HEADLESS:+, headless})"; exit 0; }; done
+    echo "failed to start; see $D/browser.log"; exit 1 ;;
+
+  stop)   bash "$D/killauto.sh" "$PORT" ;;
+  status) up && { curl -s "http://127.0.0.1:$PORT/json/version" | head -c 200; echo; } \
+              || echo "not running" ;;
+
+  sync)
+    # Refresh stored logins from the everyday profile.
+    # Close that browser first, or the copy may catch a half-written database.
+    [ -d "$LIVE" ] || { echo "no $NAME profile at $LIVE"; exit 1; }
+    bash "$D/killauto.sh" "$PORT" >/dev/null 2>&1; sleep 2
+    rm -rf "$AUTH"; mkdir -p "$AUTH"
+    if [ "$FAMILY" = firefox ]; then
+      # Firefox keeps sessions in a handful of files; copy the profile wholesale.
+      cp -r "$LIVE/." "$AUTH/" 2>/dev/null
+      rm -f "$AUTH/lock" "$AUTH/.parentlock" 2>/dev/null
+    else
+      mkdir -p "$AUTH/Default"
+      cp "$LIVE/Local State" "$AUTH/" 2>/dev/null
+      for f in Cookies "Login Data" "Web Data" Preferences "Secure Preferences" \
+               "Local Storage" "Session Storage" Network; do
+        cp -r "$LIVE/Default/$f" "$AUTH/Default/" 2>/dev/null
+      done
+    fi
+    echo "synced $NAME logins ($(du -sh "$AUTH" | cut -f1)) -> $AUTH" ;;
+
+  doctor)
+    ok=0; bad=0
+    chk(){ if eval "$2" >/dev/null 2>&1; then echo "  ok    $1"; ok=$((ok+1));
+           else echo "  FAIL  $1 -- $3"; bad=$((bad+1)); fi; }
+    echo "gaze doctor"
+    echo "  browser: $NAME ($FAMILY, $([ "$FAMILY" = firefox ] && echo BiDi || echo CDP))"
+    echo "  binary:  $BIN"
+    chk "browser binary"       "[ -x '$BIN' ]"                       "$NAME is not installed"
+    chk "node"                 "command -v node"                     "node not on PATH"
+    chk "backend present"      "[ -f '$BACKEND' ]"                   "missing $BACKEND"
+    [ "$FAMILY" = chromium ] && \
+      chk "playwright installed" "[ -d '$D/node_modules/playwright' ]" "run: (cd $D && npm i)"
+    chk "DISPLAY set ($DISPLAY)" "[ -n '$DISPLAY' ]"                 "no X display; a visible browser cannot start"
+    chk "everyday profile"     "[ -d '$LIVE' ]"                      "cannot find $NAME to sync from"
+    chk "cloned profile"       "[ -d '$AUTH' ]"                      "run: gaze sync"
+    if up; then echo "  ok    debug port :$PORT is live"; ok=$((ok+1))
+    else echo "  --    not running (start it with: gaze start)"; fi
+    if [ -d "$AUTH" ]; then
+      age=$(( ( $(date +%s) - $(stat -c %Y "$AUTH") ) / 86400 ))
+      echo "        profile snapshot is ${age}d old; re-run 'gaze sync' if sessions have rotated"
+    fi
+    echo "$ok ok, $bad failed"
+    [ "$bad" -eq 0 ] ;;
+
+  *) exec node "$BACKEND" "$@" ;;
+esac

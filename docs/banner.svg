@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 320" width="1280" height="320" role="img" aria-label="gaze: it sees the page, and it acts">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#0f3b1e" stop-opacity="0.95"/>
+      <stop offset="55%" stop-color="#0b1d12" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#07090b" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="iris" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#5ee27a"/>
+      <stop offset="55%" stop-color="#2ea043"/>
+      <stop offset="100%" stop-color="#116329"/>
+    </linearGradient>
+    <linearGradient id="rule" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#3fb950"/>
+      <stop offset="100%" stop-color="#3fb950" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="eyeclip">
+      <path d="M96 160c60-58 132-58 192 0-60 58-132 58-192 0z"/>
+    </clipPath>
+  </defs>
+
+  <rect width="1280" height="320" fill="#07090b"/>
+
+  <!-- scanlines: machine, not decoration -->
+  <g stroke="#0e1319" stroke-width="1">
+    <path d="M0 40h1280M0 80h1280M0 120h1280M0 160h1280M0 200h1280M0 240h1280M0 280h1280"/>
+  </g>
+
+  <circle cx="192" cy="160" r="150" fill="url(#glow)"/>
+
+  <!-- the gaze -->
+  <g>
+    <path d="M96 160c60-58 132-58 192 0-60 58-132 58-192 0z" fill="#04070a" stroke="#2ea043" stroke-width="2.5"/>
+    <g clip-path="url(#eyeclip)">
+      <circle cx="192" cy="160" r="46" fill="url(#iris)"/>
+      <circle cx="192" cy="160" r="46" fill="none" stroke="#7ff09a" stroke-width="1.5" opacity="0.55"/>
+      <!-- vertical slit: reptilian, not human -->
+      <ellipse cx="192" cy="160" rx="7.5" ry="42" fill="#04070a"/>
+      <circle cx="176" cy="142" r="7" fill="#dffbe6" opacity="0.85"/>
+    </g>
+  </g>
+
+  <!-- wordmark -->
+  <g transform="translate(400 0)">
+    <text x="0" y="168" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace"
+          font-size="104" font-weight="700" fill="#e9f1ec" letter-spacing="6">gaze</text>
+    <rect x="4" y="192" width="300" height="2" fill="url(#rule)"/>
+    <text x="4" y="228" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif"
+          font-size="24" fill="#8b98a5">It sees the page, and it acts.</text>
+    <text x="4" y="266" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace"
+          font-size="15" fill="#4a5a68" letter-spacing="1.5">CHROMIUM VIA CDP&#160;&#160;&#183;&#160;&#160;FIREFOX VIA WEBDRIVER BiDi&#160;&#160;&#183;&#160;&#160;BASILISK</text>
+  </g>
+</svg>

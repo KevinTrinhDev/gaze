@@ -1,0 +1,8 @@
+node_modules/
+browser.log
+downloads/
+shots/
+profiles/
+*.png
+recordings/
+*.mp4
