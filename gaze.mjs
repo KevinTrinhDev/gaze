@@ -31,16 +31,31 @@ const NEVER_AUTO = [
 ];
 
 async function attach() {
-  const b = await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`);
+  // A dead browser is the single most common failure, and a raw Playwright
+  // "connect ECONNREFUSED" stack tells the operator nothing they can act on.
+  let b;
+  try {
+    b = await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`);
+  } catch (e) {
+    if (/ECONNREFUSED|ENOTFOUND|ECONNRESET|socket hang up|WebSocket/i.test(e.message))
+      throw new Error(`no browser is running on :${PORT}. start one with: gaze start`);
+    throw e;
+  }
   const ctx = b.contexts()[0];
-  if (!ctx) throw new Error('no browser context; run: gaze start');
+  // Close the handle we just opened, or the CDP socket leaks on this path.
+  if (!ctx) { await b.close().catch(() => {}); throw new Error('no browser context; run: gaze start'); }
   return { b, ctx };
 }
 // Active page = last non-blank tab, else first.
 function pick(ctx, idx) {
   const pages = ctx.pages();
   if (!pages.length) throw new Error('no open tabs');
-  if (idx != null) return pages[Number(idx)];
+  if (idx != null) {
+    const n = Number(idx);
+    if (!Number.isInteger(n) || n < 0 || n >= pages.length)
+      throw new Error(`no tab at index ${idx}; ${pages.length} tab(s) open (see: gaze tabs)`);
+    return pages[n];
+  }
   const real = pages.filter(p => !/^about:blank$/.test(p.url()));
   return real.length ? real[real.length - 1] : pages[0];
 }
@@ -141,9 +156,15 @@ const collect = (includeChrome) => {
 const CHALLENGE = () => {
   const marks = [
     'iframe[src*="recaptcha"]', 'iframe[src*="hcaptcha"]', 'iframe[src*="challenges.cloudflare.com"]',
-    '#challenge-form', '.g-recaptcha', '.h-captcha', '[data-sitekey]',
+    'iframe[src*="turnstile"]',
+    // NOT a bare [data-sitekey]: sites leave that element in the DOM after the
+    // challenge is already passed, which reported a challenge on a solved page.
+    '#challenge-form', '.g-recaptcha', '.h-captcha', '.cf-turnstile',
   ];
-  const found = marks.filter(m => document.querySelector(m));
+  // A marker that is not rendered is a leftover, not a live challenge: sites
+  // keep the widget container in the DOM after it has already been solved.
+  const shown = el => !!el && (el.getClientRects().length > 0 || !!el.offsetParent);
+  const found = marks.filter(m => shown(document.querySelector(m)));
   const t = (document.body?.innerText || '').toLowerCase();
   const phrase = ['verify you are human', 'i am not a robot', 'checking your browser',
                   'complete the security check'].find(p => t.includes(p));
@@ -203,7 +224,13 @@ function emit(kind, url, text, data, { json, raw }) {
 // With no terminal and no explicit opt-out we REFUSE rather than silently
 // proceeding: an unattended agent must be configured deliberately, not by
 // accident.
-const WRITE_CMDS = new Set(['click', 'fill', 'press', 'download', 'eval', 'login']);
+// `upload` sends a local file to whatever page is loaded, `record` writes frames
+// to disk, and `session load` replays saved auth cookies. All three change
+// something, so all three are gated. `session list` is a read and stays ungated.
+const WRITE_CMDS = new Set(['click', 'fill', 'press', 'download', 'eval', 'login',
+                            'upload', 'record', 'session']);
+const isWrite = a =>
+  WRITE_CMDS.has(a[0]) && !(a[0] === 'session' && (a[1] || 'list') === 'list');
 const APPROVAL = process.env.GAZE_APPROVAL || 'prompt';
 
 function askTty(question) {
@@ -254,8 +281,12 @@ function logLine(cmd, argv, host, ms, ok, err) {
   if (!LOG_ON) return;
   try {
     mkdirSync(`${homedir()}/.local/share/gaze`, { recursive: true });
+    // For `fill`/`login` arg0 is a selector or vault item name: harmless, and
+    // it makes the log readable. For `eval` arg0 is the script itself, which is
+    // exactly where a secret shows up, so it must NOT be spared.
+    const keepFirst = cmd !== 'eval';
     const args = REDACT.has(cmd)
-      ? argv.slice(1).map((a, i) => (a.startsWith('--') || i === 0 ? a : '<redacted>'))
+      ? argv.slice(1).map((a, i) => (a.startsWith('--') || (keepFirst && i === 0) ? a : '<redacted>'))
       : argv.slice(1);
     appendFileSync(LOG_FILE, JSON.stringify({
       ts: new Date().toISOString(), cmd, args, host, ms, ok,
@@ -380,6 +411,8 @@ async function dispatch(ctx, argv) {
       const out = flag('out', `${DIR}shots/shot-${stamp()}.png`);
       mkdirSync(`${DIR}shots`, { recursive: true });
       await p.screenshot({ path: out, fullPage: has('full') });
+      // A screenshot outlives the session and can hold anything on screen.
+      try { chmodSync(out, 0o600); } catch {}
       console.log(out);
       break;
     }
@@ -822,7 +855,24 @@ async function dispatch(ctx, argv) {
     }
 
     default:
-      console.log(`gaze <cmd>
+      console.log(USAGE);
+  }
+}
+
+const USAGE = `gaze <cmd>
+
+ browser (handled by the launcher, no running browser needed)
+  start [--headless]            launch the browser and hold it open
+  stop | status                 kill it / report whether it is up
+  sync                          re-copy logins from your everyday profile
+                                (close that browser first)
+  doctor                        check binary, profile, cookies, debug port
+  browsers                      what is installed and which is selected
+  icon                          give the automation window its own taskbar
+                                icon, so it stops stacking under your browser
+  version | update
+
+ page
   tabs [--json]                 list open tabs
   goto <url> [--new] [--tab N]  navigate
   text [--max N]                page text
@@ -866,6 +916,7 @@ async function dispatch(ctx, argv) {
 
  consent (full capability, gated)
   write actions ask first: click fill press download eval login
+                           upload record session-load
   --yes                         pre-approve this invocation
   stats [--days N]              speed, failure rate and busiest sites
   log [--n N]                   raw recent entries (GAZE_LOG=off disables)
@@ -876,12 +927,24 @@ async function dispatch(ctx, argv) {
 
  untrusted output
   text/html/scrape/links/table are wrapped and injection-scanned
-  --raw                         bare output, no envelope`);
-  }
-}
+  --raw                         bare output, no envelope`;
 
 // -------------------------------------------------------------------- main --
 const argv = process.argv.slice(2);
+
+// Help must work when NO browser is running: connecting first turned `gaze --help`
+// into a raw CDP "ECONNREFUSED" stack. Resolve help and unknown commands here,
+// before attach() is ever called.
+const KNOWN_CMDS = new Set(['tabs', 'goto', 'text', 'html', 'map', 'shot', 'record', 'click', 'fill', 'press', 'eval', 'download', 'upload', 'indicator', 'scrape', 'links', 'table', 'console', 'network', 'session', 'challenge', 'wait-human', 'login', 'batch', 'stats', 'log', 'grant', 'revoke', 'grant-status']);
+if (!argv.length || ['help', '--help', '-h'].includes(argv[0])) {
+  console.log(USAGE);
+  process.exit(0);
+}
+if (!KNOWN_CMDS.has(argv[0])) {
+  console.error(`unknown command: ${argv[0]}\n`);
+  console.log(USAGE);
+  process.exit(2);   // exit non-zero so scripts can branch on a typo
+}
 
 // grant/revoke never need a browser, so handle them before attaching.
 if (argv[0] === 'stats' || argv[0] === 'log') {
@@ -988,7 +1051,7 @@ try {
     const parsed = lines.map(line => ({
       line, parts: line.match(/"[^"]*"|\S+/g).map(s => s.replace(/^"|"$/g, '')) }));
     // ONE confirmation for the whole script, not one per step.
-    const writes = parsed.filter(p => WRITE_CMDS.has(p.parts[0]));
+    const writes = parsed.filter(p => isWrite(p.parts));
     if (writes.length && !preApproved && !approve(writes.map(w => w.line), where())) {
       console.error('ERR: not approved');
       process.exitCode = 3;
@@ -999,7 +1062,7 @@ try {
       }
     }
   } else {
-    if (WRITE_CMDS.has(argv[0]) && !preApproved &&
+    if (isWrite(argv) && !preApproved &&
         !approve([argv.join(' ')], where())) {
       console.error('ERR: not approved');
       process.exitCode = 3;

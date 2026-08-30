@@ -73,9 +73,17 @@ that keep costing time:
 - Firefox goes through `gaze-bidi.mjs` (WebDriver BiDi, hand-rolled client).
 - Adding a browser is one row in the table at the top of `bin/gaze`.
 
-Both backends have a headless self-test that never touches a real profile. Run
-both before committing:
+Every backend has a headless self-test that never touches a real profile, and
+the bash launcher has one too. Run them all before committing:
 
 ```bash
-npm test && npm run test:firefox
+npm run test:all
 ```
+
+`test:launcher` is the one people forget. It covers `bin/gaze` itself, which is
+where the two worst bugs this project has had actually lived: `doctor` built
+shell test expressions as strings and ran them through `eval`, so a quote in
+`GAZE_PROFILE` executed arbitrary commands; and `sync` called `rm -rf` on an
+operator-supplied path without checking it was a gaze clone, so a mistyped
+`GAZE_PROFILE=$HOME` would have deleted the home directory. Neither backend
+self-test could ever have caught either one.

@@ -243,6 +243,59 @@ try {
   check('batch runs every command', batched.includes('$ tabs') && batched.includes('$ text --max 40'));
   check(`batch is faster than separate calls (${batchMs}ms vs ${serialMs}ms)`, batchMs < serialMs);
 
+
+  // ---- regressions: failures found by stress-testing the real browser -------
+  // Each of these was a real defect. They stay here so they cannot come back.
+
+  // A command run against a port with no browser on it. Nothing listens on 9.
+  const atDeadPort = (...args) => {
+    try {
+      return { out: execFileSync('node', [join(DIR, '..', 'gaze.mjs'), ...args],
+        { env: { ...process.env, GAZE_PORT: '9', GAZE_APPROVAL: 'off' },
+          encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }), code: 0 };
+    } catch (e) { return { out: (e.stdout || '') + (e.stderr || ''), code: e.status }; }
+  };
+
+  // `gaze --help` used to connect to CDP first, so it failed with a raw
+  // "connect ECONNREFUSED" stack whenever the browser was not already running.
+  const helpDead = atDeadPort('--help');
+  check('help works with no browser running', helpDead.code === 0 && helpDead.out.includes('gaze <cmd>'),
+        `exit ${helpDead.code}`);
+
+  // An unknown command printed usage and exited 0, so a typo looked like success.
+  const bogus = atDeadPort('deffo-not-a-command');
+  check('an unknown command exits non-zero', bogus.code === 2, `exit ${bogus.code}`);
+
+  // A dead browser produced a multi-line Playwright stack instead of the fix.
+  const deadTabs = atDeadPort('tabs');
+  check('a dead browser says how to start one',
+        deadTabs.out.includes('no browser is running') && deadTabs.out.includes('gaze start'),
+        deadTabs.out.split('\n')[0]);
+  check('a dead browser does not leak a Playwright stack',
+        !deadTabs.out.includes('connectOverCDP'), deadTabs.out.split('\n')[0]);
+
+  // --tab past the end returned undefined, which crashed with
+  // "Cannot read properties of undefined (reading 'locator')".
+  const badTab = gated('text', '--tab', '99');
+  check('an out-of-range --tab is explained, not a TypeError',
+        badTab.out.includes('no tab at index 99') && !badTab.out.includes('Cannot read properties'),
+        badTab.out.split('\n')[0]);
+
+  // `eval` was in REDACT, but the redactor always kept positional 0 -- and for
+  // `eval` positional 0 IS the script, so the one argument most likely to hold a
+  // secret was written to the log in full.
+  ab('eval', '"sentinel-must-not-be-logged"');
+  const evalEntries = ab('log', '--n', '200').split('\n').filter(l => l.includes('"eval"'));
+  check('eval scripts never reach the log',
+        evalEntries.length > 0 && evalEntries.every(l => !l.includes('sentinel-must-not-be-logged')),
+        `${evalEntries.length} eval entries`);
+
+  // upload/record/session-load all change something but were never gated.
+  check('upload is gated', gated('upload', 'input[type=file]', '/etc/hostname').code === 3);
+  check('record is gated', gated('record', '--seconds', '1').code === 3);
+  check('session load is gated', gated('session', 'load', 'selftest').code === 3);
+  check('session list stays ungated', gated('session', 'list').code === 0);
+
   console.log(`${pass} passed, ${fail} failed`);
 } finally {
   await ctx.close();
