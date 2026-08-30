@@ -157,9 +157,12 @@ const CHALLENGE = () => {
   const marks = [
     'iframe[src*="recaptcha"]', 'iframe[src*="hcaptcha"]', 'iframe[src*="challenges.cloudflare.com"]',
     'iframe[src*="turnstile"]',
-    // NOT a bare [data-sitekey]: sites leave that element in the DOM after the
-    // challenge is already passed, which reported a challenge on a solved page.
+    // NOT a bare [data-sitekey]. Two reasons: sites leave that element in the
+    // DOM after the challenge is already passed, and reCAPTCHA v3 -- which is
+    // passive scoring, not a challenge -- carries it on ordinary pages.
     '#challenge-form', '.g-recaptcha', '.h-captcha', '.cf-turnstile',
+    // Cloudflare's interstitial, which runs BEFORE any widget is rendered.
+    '#cf-challenge-running', '.cf-browser-verification', '#cf-please-wait',
   ];
   // A marker that is not rendered is a leftover, not a live challenge: sites
   // keep the widget container in the DOM after it has already been solved.
@@ -167,7 +170,10 @@ const CHALLENGE = () => {
   const found = marks.filter(m => shown(document.querySelector(m)));
   const t = (document.body?.innerText || '').toLowerCase();
   const phrase = ['verify you are human', 'i am not a robot', 'checking your browser',
-                  'complete the security check'].find(p => t.includes(p));
+                  'complete the security check', 'just a moment',
+                  'verifying you are human',
+                  'needs to review the security of your connection',
+                  'enable javascript and cookies to continue'].find(p => t.includes(p));
   return { challenged: found.length > 0 || !!phrase, markers: found, phrase: phrase || null };
 };
 

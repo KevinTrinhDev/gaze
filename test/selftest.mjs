@@ -244,6 +244,29 @@ try {
   check(`batch is faster than separate calls (${batchMs}ms vs ${serialMs}ms)`, batchMs < serialMs);
 
 
+  // Cloudflare's interstitial has no marker element, only wording, so it was
+  // invisible to the detector until the phrase list grew.
+  ab('goto', url + 'interstitial', '--wait', '400');
+  let interOut = '', interCode = 0;
+  try { interOut = ab('challenge'); }
+  catch (e) { interOut = e.stdout || ''; interCode = e.status; }
+  check('detects a Cloudflare interstitial with no widget',
+        interOut.includes('CHALLENGE DETECTED') && interCode === 2, interOut.trim().split('\n')[0]);
+
+  // reCAPTCHA v3 scores passively and is not a challenge, but it puts
+  // data-sitekey on ordinary pages -- so a bare [data-sitekey] must not count.
+  ab('goto', url + 'passive', '--wait', '400');
+  check('a passive reCAPTCHA v3 sitekey is not called a challenge',
+        ab('challenge').includes('no challenge detected'));
+
+  // A screenshot outlives the session and can hold anything that was on screen,
+  // so it must not inherit a world-readable umask the way it used to.
+  const shotPath = ab('shot').trim().split('\n').pop();
+  check('a screenshot is not world-readable',
+        (statSync(shotPath).mode & 0o777) === 0o600,
+        '0' + (statSync(shotPath).mode & 0o777).toString(8));
+  rmSync(shotPath, { force: true });
+
   // ---- regressions: failures found by stress-testing the real browser -------
   // Each of these was a real defect. They stay here so they cannot come back.
 

@@ -7,7 +7,7 @@
 //
 // Nothing here starts a browser or touches a real profile.
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -40,11 +40,12 @@ try {
   check('a quote in GAZE_PROFILE cannot execute a command',
         !existsSync(marker), `${marker} was created`);
 
-  // The same path reaches doctor from a Firefox profiles.ini Path= value, so the
-  // check has to hold for any hostile-looking path, not just this one shape.
+  // A second shape that also escaped the old single-quoted string. `$(...)` is
+  // NOT a useful payload here -- single quotes neutralise it either way, so a
+  // test using one passes even against the vulnerable code and proves nothing.
   const marker2 = join(scratch, 'executed2');
-  run({ GAZE_PROFILE: `$(touch ${marker2})` }, 'doctor');
-  check('command substitution in GAZE_PROFILE does not run',
+  run({ GAZE_PROFILE: `x' || touch ${marker2} || echo '` }, 'doctor');
+  check('a quote plus || in GAZE_PROFILE cannot execute a command',
         !existsSync(marker2), `${marker2} was created`);
 
   // doctor still has to work normally.
@@ -78,6 +79,29 @@ try {
   check('version works with no browser', ver.code === 0 && ver.out.startsWith('gaze '), ver.out.trim());
   const brow = run({}, 'browsers');
   check('browsers lists the table', brow.code === 0 && brow.out.includes('DRIVER'));
+
+  // ---- gaze icon: its own taskbar identity, so it stops stacking -----------
+  // Runs against a throwaway HOME so it never touches the real desktop config.
+  const fakeHome = join(scratch, 'home');
+  mkdirSync(fakeHome, { recursive: true });
+  const iconRun = run({ HOME: fakeHome }, 'icon');
+  const desktop = join(fakeHome, '.local/share/applications/gaze.desktop');
+  check('icon installs a desktop entry', iconRun.code === 0 && existsSync(desktop),
+        `exit ${iconRun.code}`);
+  check('icon installs at least one icon size',
+        existsSync(join(fakeHome, '.local/share/icons/hicolor/128x128/apps/gaze.png')));
+  const entry = existsSync(desktop) ? readFileSync(desktop, 'utf8') : '';
+  check('the desktop entry claims the gaze window class',
+        entry.includes('StartupWMClass=gaze'), entry.slice(0, 60));
+
+  // The desktop entry only matches the window if the browser is actually
+  // launched with that class. If these two drift, the icon silently stops
+  // working and the window stacks under the everyday browser again.
+  const launcherSrc = readFileSync(GAZE, 'utf8');
+  check('the launcher starts the browser with that same class',
+        /--class[= ]gaze/.test(launcherSrc) &&
+        (launcherSrc.match(/--class[= ]gaze/g) || []).length >= 2,
+        'chromium and firefox branches must both set it');
 
   console.log(`${pass} passed, ${fail} failed`);
 } finally {
