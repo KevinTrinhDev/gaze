@@ -9,3 +9,4 @@ recordings/
 
 # ...but the repo art is intentional
 !docs/*.png
+demo/frames/

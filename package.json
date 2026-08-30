@@ -11,7 +11,8 @@
   "scripts": {
     "test": "node test/selftest.mjs",
     "test:firefox": "node test/firefox-selftest.mjs",
-    "test:mcp": "node test/mcp-selftest.mjs"
+    "test:mcp": "node test/mcp-selftest.mjs",
+    "demo": "node demo/record-demo.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
