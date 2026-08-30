@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640" role="img" aria-label="gaze: it sees the page, and it acts">
+  <defs>
+    <radialGradient id="vig2" cx="50%" cy="40%" r="68%">
+      <stop offset="0%" stop-color="#121821"/>
+      <stop offset="100%" stop-color="#07080a"/>
+    </radialGradient>
+    <linearGradient id="slit2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#8CFAB0"/>
+      <stop offset="48%" stop-color="#33D17A"/>
+      <stop offset="100%" stop-color="#0E5C34"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1280" height="640" fill="url(#vig2)"/>
+
+  <g transform="translate(640 246)" fill="none">
+    <!-- aperture rings: an instrument, not a logo -->
+    <circle r="150" stroke="#161f1a" stroke-width="1"/>
+    <circle r="118" stroke="#1d3527" stroke-width="1"/>
+    <circle r="86"  stroke="#2b6b45" stroke-width="1.25"/>
+    <!-- iris -->
+    <circle r="58"  stroke="#33D17A" stroke-width="1.5" opacity="0.95"/>
+    <!-- calibration ticks: sides and top only, so nothing collides with the wordmark -->
+    <g stroke="#2b6b45" stroke-width="1.25" stroke-linecap="round">
+      <path d="M-168 0h-22M168 0h22M0 -168v-22"/>
+    </g>
+    <g stroke="#161f1a" stroke-width="1" stroke-linecap="round">
+      <path d="M119 -119l15 -15M-119 -119l-15 -15M119 119l15 15M-119 119l-15 15"/>
+    </g>
+    <!-- the slit, contained within the iris -->
+    <path d="M0 -50 C 10 -25, 10 25, 0 50 C -10 25, -10 -25, 0 -50 Z"
+          fill="url(#slit2)" stroke="none"/>
+    <!-- specular highlight, sitting on the iris edge rather than floating -->
+    <circle r="4" cx="-24" cy="-38" fill="#E8FBEF" stroke="none" opacity="0.7"/>
+  </g>
+
+  <g text-anchor="middle">
+    <text x="640" y="486" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace"
+          font-size="94" font-weight="500" fill="#EAF0EC" letter-spacing="20">gaze</text>
+    <rect x="520" y="514" width="240" height="1" fill="#22452f"/>
+    <text x="640" y="550" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif"
+          font-size="23" fill="#96A3AE">It sees the page, and it acts.</text>
+    <text x="640" y="590" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace"
+          font-size="13" fill="#4E5B66" letter-spacing="3.6">A REAL BROWSER, ALREADY LOGGED IN &#160;&#160;&#183;&#160;&#160; CLI &#38; MCP</text>
+  </g>
+</svg>
