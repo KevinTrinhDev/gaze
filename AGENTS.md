@@ -77,11 +77,15 @@ that keep costing time:
    dying. `start` now clears a stale lock, but if a headed browser still vanishes,
    check `Default/Preferences`: `exit_type: Normal` with no lock left behind means
    it shut down gracefully, i.e. something closed the window.
-6. **Google is signed out even when the cookies copy perfectly.** Every Google
-   account reads as signed out in the clone while GitHub, X and LinkedIn stay
-   live. The cookie rows, including the critical auth ones, are byte-identical
-   between the everyday profile and the clone, so this is not a copy problem and
-   re-running `sync` will not fix it.
+6. **Google sign-in in the clone is intermittent, not permanently broken.**
+   This entry used to say Google always reads as signed out and that `sync`
+   would never fix it. Retested 2026-08-31: `gemini.google.com/app` loaded with
+   full chat history and `mail.google.com` landed on `/mail/u/0/#inbox`, both
+   authenticated, in a freshly synced clone. So treat a signed-out Google as a
+   stale profile snapshot, not a dead end: close Brave, re-run `gaze sync`, and
+   check again before concluding anything is unreachable. If it is still signed
+   out after a fresh sync, that is worth investigating; it is not the expected
+   state.
 
 ## Changing the driver
 

@@ -559,14 +559,71 @@ async function dispatch(ctx, argv) {
       const file = `${SESSIONS}/${(name || 'default').replace(/[^\w.-]/g, '_')}.json`;
       if (sub === 'save') {
         const state = await ctx.storageState();
+        // storageState() reads per-origin localStorage over the CDP Runtime
+        // domain, and Patchright suppresses Runtime.enable to stay stealthy, so
+        // state.origins comes back EMPTY here even when localStorage is full.
+        // Measured: a page with a token in localStorage produced origins: [].
+        // Reading it from inside each open page instead does not touch that
+        // domain, so it survives. Only open tabs can be captured, which is the
+        // case that matters: you save the session you are looking at.
+        const seen = new Map();
+        for (const o of (state.origins || [])) seen.set(o.origin, o);
+        for (const page of ctx.pages()) {
+          try {
+            const u = new URL(page.url());
+            if (u.protocol !== 'http:' && u.protocol !== 'https:') continue;
+            const items = await page.evaluate(() => {
+              const out = [];
+              try {
+                for (let i = 0; i < localStorage.length; i++) {
+                  const name = localStorage.key(i);
+                  out.push({ name, value: localStorage.getItem(name) });
+                }
+              } catch {}
+              return out;
+            });
+            if (items.length) seen.set(u.origin, { origin: u.origin, localStorage: items });
+          } catch {}
+        }
+        state.origins = [...seen.values()];
         writeFileSync(file, JSON.stringify(state, null, 2));
-        chmodSync(file, 0o600);           // contains live cookies
-        console.log(`saved ${state.cookies.length} cookies -> ${file}`);
+        chmodSync(file, 0o600);           // contains live cookies AND tokens
+        const keys = state.origins.reduce((n, o) => n + o.localStorage.length, 0);
+        console.log(`saved ${state.cookies.length} cookies, ${keys} localStorage key(s) across ${state.origins.length} origin(s) -> ${file}`);
       } else if (sub === 'load') {
         if (!existsSync(file)) { console.error(`ERR: no session at ${file}`); process.exitCode = 1; break; }
         const state = JSON.parse(readFileSync(file, 'utf8'));
         await ctx.addCookies(state.cookies || []);
-        console.log(`restored ${(state.cookies || []).length} cookies from ${file}`);
+        // storageState() captures per-origin localStorage too, and plenty of
+        // sites keep their auth token there rather than in a cookie. Restoring
+        // only the cookies looked like it worked and then silently left those
+        // sites logged out. localStorage is origin-scoped and only reachable
+        // from a document on that origin, so each one has to be visited.
+        const origins = Array.isArray(state.origins) ? state.origins : [];
+        let restored = 0, failed = 0;
+        for (const o of origins) {
+          const items = Array.isArray(o.localStorage) ? o.localStorage : [];
+          if (!o.origin || !items.length) continue;
+          let page;
+          try {
+            page = await ctx.newPage();
+            await page.goto(o.origin, { waitUntil: 'domcontentloaded', timeout: 15000 });
+            await page.evaluate((kv) => {
+              for (const { name, value } of kv) {
+                try { localStorage.setItem(name, value); } catch {}
+              }
+            }, items);
+            restored++;
+          } catch {
+            failed++;
+          } finally {
+            try { await page?.close(); } catch {}
+          }
+        }
+        const parts = [`${(state.cookies || []).length} cookies`];
+        if (origins.length) parts.push(`localStorage for ${restored}/${origins.length} origin(s)`);
+        if (failed) parts.push(`${failed} unreachable`);
+        console.log(`restored ${parts.join(', ')} from ${file}`);
       } else if (sub === 'list') {
         const { readdirSync } = await import('node:fs');
         const f = existsSync(SESSIONS) ? readdirSync(SESSIONS).filter(x => x.endsWith('.json')) : [];
