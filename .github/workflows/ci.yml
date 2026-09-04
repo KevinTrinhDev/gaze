@@ -29,6 +29,12 @@ jobs:
       - name: install chromium for the self-test
         run: npx playwright install --with-deps chromium
 
+      # record's mp4 output is optional by design and the suite skips it when
+      # ffmpeg is absent, but CI should exercise the real path rather than the
+      # fallback, so install it here.
+      - name: install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
       - name: syntax
         run: |
           node --check gaze.mjs

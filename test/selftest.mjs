@@ -129,13 +129,28 @@ try {
         noMatch.includes('no element matched') && noMatch.includes('tried'), noMatch.trim().slice(0, 70));
 
   // ---- recording ----
+  // mp4 is documented as optional: frames are the source of truth and a
+  // missing ffmpeg still exits 0. Asserting mp4 unconditionally made the
+  // suite fail on any machine without ffmpeg, CI included, for a case the
+  // design says is fine. Check it only when ffmpeg is actually there.
+  let hasFfmpeg = true;
+  try { execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); }
+  catch { hasFfmpeg = false; }
+
   const rec = ab('record', '--seconds', '2', '--fps', '4');
   const recPath = rec.trim().split('\n').pop();
-  check('record produces an mp4', recPath.endsWith('.mp4'), recPath);
-  check('the recording file exists and is non-empty',
-        existsSync(recPath) && statSync(recPath).size > 1000,
-        existsSync(recPath) ? String(statSync(recPath).size) + ' bytes' : 'missing');
-  rmSync(recPath, { force: true });
+  if (hasFfmpeg) {
+    check('record produces an mp4', recPath.endsWith('.mp4'), recPath);
+    check('the recording file exists and is non-empty',
+          existsSync(recPath) && statSync(recPath).size > 1000,
+          existsSync(recPath) ? String(statSync(recPath).size) + ' bytes' : 'missing');
+  } else {
+    check('record falls back to frames when ffmpeg is absent',
+          rec.includes('frames ('), rec.trim().slice(0, 70));
+  }
+  // With ffmpeg the last line is the mp4 path; without it, it is
+  // "N frames (X MB) in <dir>", so take the part after " in ".
+  rmSync(recPath.split(' in ').pop().trim(), { recursive: true, force: true });
   const framesOut = ab('record', '--seconds', '1', '--fps', '3', '--format', 'frames');
   check('frames-only mode never needs ffmpeg', framesOut.includes('frames ('), framesOut.trim());
   rmSync(framesOut.trim().split(' in ').pop().trim(), { recursive: true, force: true });

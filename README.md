@@ -1,13 +1,6 @@
 <img src="docs/banner.png" alt="GAZE" width="100%">
 
 <p align="center">
-  <a href="https://github.com/KevinTrinhDev/gaze/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/KevinTrinhDev/gaze/ci.yml?branch=main&style=for-the-badge&label=tests" alt="tests"></a>
-  <img src="https://img.shields.io/badge/node-%3E%3D18-339933?style=for-the-badge&logo=node.js&logoColor=white" alt="node >=18">
-  <img src="https://img.shields.io/badge/license-MPL--2.0-orange?style=for-the-badge" alt="MPL-2.0">
-  <img src="https://img.shields.io/badge/writes-gated-8b5cf6?style=for-the-badge" alt="writes gated">
-</p>
-
-<p align="center">
   <a href="docs/USAGE.md">Usage</a> &nbsp;·&nbsp;
   <a href="docs/GAUNTLET.md">Benchmark</a> &nbsp;·&nbsp;
   <a href="docs/SECURITY.md">Security</a> &nbsp;·&nbsp;
