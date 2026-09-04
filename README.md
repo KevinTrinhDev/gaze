@@ -128,6 +128,7 @@ Honest answers, including the noes. Everything marked ✅ has a test behind it.
 | ✅ | **Save and restore sessions** | `session save\|load\|list`, cookies plus localStorage, mode 600 |
 | ✅ | **Log in as you** | `login` fills from Bitwarden, including TOTP, using a vault session *you* unlocked |
 | ✅ | **Stay logged in** | It drives a clone of your everyday profile, so Google, GitHub and the rest are already signed in. No credential is needed to act: it inherits one |
+| ➖ | **Passkeys and native sign-in prompts** | Gaze can initiate the page's normal sign-in control and preserves the browser/session afterward; the person completes any browser, OS, or hardware-key prompt. Gaze never reads, forges, or clicks a passkey assertion |
 | ✅ | **Read your email** | `goto mail.google.com` then `text`. It works because the session is already yours |
 | ✅ | **Run fully unattended** | `gaze grant` for a bounded standing approval, or `--yes`, or `GAZE_APPROVAL=off` |
 | ✅ | **Detect a CAPTCHA** | `challenge` spots reCAPTCHA, hCaptcha, Turnstile, Cloudflare interstitials, PerimeterX and DataDome, and tells a *challenge* apart from a *block* |
@@ -237,6 +238,10 @@ in as you, what it can reach, and how to stop it. See [AGENTS.md](AGENTS.md).
 **Transport is stdio only, deliberately.** Nothing listens on a port, so no remote
 or cloud agent can reach a browser holding your live sessions.
 
+Failures are returned to the calling shell or MCP client immediately. Locally,
+`gaze log` keeps redacted command outcomes and `gaze stats` summarizes failure
+rates, common errors, and latency; neither sends telemetry anywhere.
+
 </details>
 
 <details>
@@ -299,7 +304,7 @@ npm run test:mcp
 npm run demo
 ```
 
-192 checks, run on every push and pull request. Every suite launches a disposable
+193 checks, run on every push and pull request. Every suite launches a disposable
 browser with a temporary profile on its own port, so **none of them touches a
 real profile**.
 

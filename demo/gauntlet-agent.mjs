@@ -248,12 +248,12 @@ step(12, `the gauntlet (boss)     +${items.size - before}`);
 
 // Submit
 const payload = JSON.stringify([...items].map(([sku, price]) => ({ sku, price })));
+// The range schema calls this field `agent`; preserve that wire format while
+// accurately identifying this deterministic CLI harness.
 const report = evaluate(`
   (async () => {
     const r = await fetch('/submit', { method: 'POST',
       headers: { 'content-type': 'application/json' },
-      // The range schema calls this field `agent`; preserve that wire format,
-      // while accurately identifying the deterministic CLI harness.
       body: JSON.stringify({ agent: 'gaze-cli-harness', items: ${payload} }) });
     return JSON.stringify(await r.text());
   })()`);

@@ -40,6 +40,7 @@ jobs:
           node --check gaze.mjs
           node --check gaze-bidi.mjs
           node --check mcp.mjs
+          node --check demo/gauntlet-agent.mjs
 
       # Every backend has a headless self-test that never touches a real
       # profile, and the bash launcher has one too. AGENTS.md requires all of
