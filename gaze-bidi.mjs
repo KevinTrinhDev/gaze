@@ -10,7 +10,7 @@ import { writeFileSync, chmodSync } from 'node:fs';
 // approval at all, and page text came back bare with no injection scan, while
 // the README and the MCP server both claimed the two backends behaved
 // identically. Importing the one implementation is what makes that true.
-import { isWrite, approve } from './consent.mjs';
+import { isWrite, approve, preApproved } from './consent.mjs';
 import { emit } from './untrusted.mjs';
 
 const PORT = process.env.GAZE_PORT || '9225';
@@ -95,12 +95,18 @@ function deserialize(v) {
   }
 }
 
-const [cmd, ...rest] = process.argv.slice(2);
+const [cmd, ...rawArgs] = process.argv.slice(2);
+// Everything after `--` is data, never a flag: see preApproved() in consent.mjs
+// for why that distinction is a security property and not a nicety.
+const dashDash = rawArgs.indexOf('--');
+const rest = dashDash === -1 ? rawArgs : rawArgs.slice(0, dashDash);
+const tail = dashDash === -1 ? [] : rawArgs.slice(dashDash + 1);
 const flag = (n, d) => { const i = rest.indexOf(`--${n}`); return i === -1 ? d : rest[i + 1]; };
 const has = n => rest.includes(`--${n}`);
 const positional = rest.filter((a, i) =>
   !a.startsWith('--') && !(i > 0 && rest[i - 1].startsWith('--') &&
-    !['headed', 'full', 'enter', 'new', 'nav', 'json', 'text', 'raw', 'yes'].includes(rest[i - 1].slice(2))));
+    !['headed', 'full', 'enter', 'new', 'nav', 'json', 'text', 'raw', 'yes'].includes(rest[i - 1].slice(2))))
+  .concat(tail);
 
 // Shared with the Chromium backend in spirit: hide page chrome by default, walk
 // shadow roots, emit a reusable selector. Kept as a string so it can be shipped
@@ -152,8 +158,8 @@ const CHALLENGE_JS = `(() => {
 
 // The gate runs BEFORE the browser is touched, exactly as it does on the
 // Chromium side. A refusal exits 3 so callers can branch on it.
-const preApproved = rest.includes('--yes');
-if (isWrite([cmd, ...positional]) && !preApproved) {
+const preApprovedRun = preApproved(rest);
+if (isWrite([cmd, ...positional]) && !preApprovedRun) {
   const where = `the page this Firefox is on (:${PORT})`;
   if (!approve([`${cmd} ${positional.join(' ')}`.trim()], where)) {
     console.error('ERR: not approved');

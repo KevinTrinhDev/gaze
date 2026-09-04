@@ -277,6 +277,10 @@ npm run test:launcher
 ```
 
 ```bash
+npm run test:consent
+```
+
+```bash
 npm run test:firefox
 ```
 
@@ -288,7 +292,7 @@ npm run test:mcp
 npm run demo
 ```
 
-158 checks, run on every push and pull request. Every suite launches a disposable
+171 checks, run on every push and pull request. Every suite launches a disposable
 browser with a temporary profile on its own port, so **none of them touches a
 real profile**.
 

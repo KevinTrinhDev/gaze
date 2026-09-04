@@ -52,6 +52,12 @@ jobs:
       - name: launcher self-test
         run: npm run test:launcher
 
+      # Browser-free, so it runs everywhere. This is where the consent gate,
+      # the ticket accounting and the --yes bypass are asserted, deliberately
+      # NOT in a suite that can be skipped for environment reasons.
+      - name: consent self-test
+        run: npm run test:consent
+
       - name: firefox self-test
         run: npm run test:firefox
 

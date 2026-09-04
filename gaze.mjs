@@ -25,7 +25,7 @@ import { writeFileSync, readFileSync, appendFileSync, mkdirSync, chmodSync, exis
          openSync, readSync, writeSync, closeSync, fstatSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
-import { STATE, WRITE_CMDS, isWrite, APPROVAL, approve, askTty,
+import { STATE, WRITE_CMDS, isWrite, APPROVAL, approve, askTty, preApproved, afterDashDash,
          readGrant, claimGrant, grantLeft, remainingOf,
          issueGrant, revokeGrant, GRANT_FILE, TICKETS } from './consent.mjs';
 import { emit, sniff } from './untrusted.mjs';
@@ -337,11 +337,21 @@ function logLine(cmd, argv, host, ms, ok, err) {
   } catch { /* logging must never break the command */ }
 }
 const hostOf = u => { try { return new URL(u).host; } catch { return null; } };
-// origin + path, never the query or fragment.
+// Origin and path are kept, because that is what makes the log worth having.
+// The query and the fragment are not, because that is where magic-link tokens,
+// OAuth codes and signed-URL signatures live. Userinfo goes too: URL.origin
+// drops it. A secret embedded in the PATH itself still survives, which is a
+// deliberate trade rather than an oversight -- stripping the path would leave
+// entries that say nothing at all.
 const stripQuery = u => {
   try {
     const x = new URL(u);
-    return x.origin + x.pathname + (x.search || x.hash ? '?<redacted>' : '');
+    const hidden = x.search || x.hash ? '?<redacted>' : '';
+    if (x.protocol === 'http:' || x.protocol === 'https:')
+      return x.origin + x.pathname + hidden;
+    // data:, file: and blob: have no origin: it stringifies to the literal
+    // "null", which wrote entries like "null/etc/passwd" into the log.
+    return x.href.split(/[?#]/)[0] + hidden;
   } catch { return u; }
 };
 
@@ -349,13 +359,18 @@ const stripQuery = u => {
 
 
 function parse(argv) {
-  const [cmd, ...rest] = argv;
+  const [cmd, ...raw] = argv;
+  // Everything after `--` is data, never a flag. This is the safe way to pass
+  // a selector that came from a page and might look like an option.
+  const tail = afterDashDash(raw);
+  const stop = raw.indexOf('--');
+  const rest = stop === -1 ? raw : raw.slice(0, stop);
   const flag = (n, d) => { const i = rest.indexOf(`--${n}`); return i === -1 ? d : rest[i + 1]; };
   const has = n => rest.includes(`--${n}`);
   const positional = rest.filter((a, i) =>
     !a.startsWith('--') && !(i > 0 && rest[i - 1].startsWith('--') &&
       !['headed','full','enter','new','nav','json','text','submit','totp','raw','yes','reload','json-only'].includes(rest[i-1].slice(2))));
-  return { cmd, rest, flag, has, positional };
+  return { cmd, rest, flag, has, positional: positional.concat(tail) };
 }
 
 async function dispatch(ctx, argv) {
@@ -1118,7 +1133,7 @@ if (argv[0] === 'grant' || argv[0] === 'revoke' || argv[0] === 'grant-status') {
     const acts = gflag('actions', null);
     const scope = [`grant a standing approval for ${mins} minutes` +
                    (acts ? `, ${acts} actions` : ', unlimited actions')];
-    if (!argv.includes('--yes') && !approve(scope, 'every page this browser visits')) {
+    if (!preApproved(argv) && !approve(scope, 'every page this browser visits')) {
       console.error('ERR: not approved');
       process.exitCode = 3;
     } else {
@@ -1134,7 +1149,7 @@ if (argv[0] === 'grant' || argv[0] === 'revoke' || argv[0] === 'grant-status') {
 let b, ctx;
 try {
   ({ b, ctx } = await attach());
-  const preApproved = argv.includes('--yes');
+  const preApprovedRun = preApproved(argv);
   const where = () => { try { return pick(ctx).url(); } catch { return '(no open tab)'; } };
   // Every command is timed and recorded so `gaze stats` can show what is slow
   // and what keeps failing. Logging never changes behaviour or swallows an error.
@@ -1157,7 +1172,7 @@ try {
       line, parts: line.match(/"[^"]*"|\S+/g).map(s => s.replace(/^"|"$/g, '')) }));
     // ONE confirmation for the whole script, not one per step.
     const writes = parsed.filter(p => isWrite(p.parts));
-    if (writes.length && !preApproved && !approve(writes.map(w => w.line), where())) {
+    if (writes.length && !preApprovedRun && !approve(writes.map(w => w.line), where())) {
       console.error('ERR: not approved');
       process.exitCode = 3;
     } else {
@@ -1167,7 +1182,7 @@ try {
       }
     }
   } else {
-    if (isWrite(argv) && !preApproved &&
+    if (isWrite(argv) && !preApprovedRun &&
         !approve([argv.join(' ')], where())) {
       console.error('ERR: not approved');
       process.exitCode = 3;

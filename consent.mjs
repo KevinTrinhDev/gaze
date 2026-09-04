@@ -32,6 +32,28 @@ export const isWrite = a =>
 
 export const APPROVAL = process.env.GAZE_APPROVAL || 'prompt';
 
+// Consent must never be inferred from a value.
+//
+// `argv.includes('--yes')` looked harmless and was not: a SELECTOR literally
+// called "--yes" satisfied it, so any caller that builds a selector from page
+// content could be steered into approving its own writes. That is an injection
+// path straight through the gate.
+//
+// So `--yes` counts only while it is genuinely a flag, which means before the
+// conventional `--` end-of-options marker. Anything after `--` is data, however
+// much it looks like an option, and a caller passing untrusted selectors should
+// put them there.
+export function preApproved(argv) {
+  const stop = argv.indexOf('--');
+  return (stop === -1 ? argv : argv.slice(0, stop)).includes('--yes');
+}
+
+// Everything after `--` is positional, never a flag.
+export const afterDashDash = argv => {
+  const stop = argv.indexOf('--');
+  return stop === -1 ? [] : argv.slice(stop + 1);
+};
+
 // A grant is "I already said yes, stop asking". Approve once, then every write
 // runs unprompted until it expires or runs out of actions.
 //
@@ -89,23 +111,48 @@ export function clearTickets() {
 // The other half of the property: claiming NEVER rewrites grant.json, it only
 // creates ticket files. That is what makes `revoke` authoritative, because no
 // in-flight claim can write a deleted grant back into existence.
+// Is the grant we are working from STILL the grant on disk? Every destructive
+// or approving step re-checks this, because `gaze revoke` and a new `gaze grant`
+// can both land while a claim is in flight. Comparing ids, not just presence,
+// is what stops an old claimant from acting on, or deleting, a newer grant.
+function stillCurrent(id) {
+  try {
+    const now = JSON.parse(readFileSync(GRANT_FILE, 'utf8'));
+    return now && now.id === id;
+  } catch { return false; }
+}
+
 export function claimGrant() {
   const g = readGrant();
   if (!g) return null;
-  if (g.actions === null) return g;            // unlimited: nothing to spend
+
+  // Unlimited grants still have to be re-checked: a claim that read the file
+  // just before `revoke` removed it must not go on to act on it.
+  if (g.actions === null) return stillCurrent(g.id) ? g : null;
 
   mkdirSync(TICKETS, { recursive: true });
   for (let k = 0; k < g.actions; k++) {
     let fd;
-    try { fd = openSync(`${TICKETS}/${g.id}.${k}`, 'wx', 0o600); }
+    const ticket = `${TICKETS}/${g.id}.${k}`;
+    try { fd = openSync(ticket, 'wx', 0o600); }
     catch { continue; }                        // someone else holds ticket k
     closeSync(fd);
+    // Confirm AFTER taking the ticket. Between readGrant() and here the
+    // operator may have revoked, or issued a different grant; either way this
+    // ticket is no longer consent, so hand it back rather than proceed.
+    if (!stillCurrent(g.id)) {
+      try { rmSync(ticket, { force: true }); } catch {}
+      return null;
+    }
     return { ...g, left: Math.max(0, g.actions - ticketsUsed(g.id, g.actions)) };
   }
-  // Every ticket is taken. Retire the grant so grant-status stops advertising
-  // an approval that can no longer be used.
-  try { rmSync(GRANT_FILE, { force: true }); } catch {}
-  clearTickets();
+  // Every ticket is taken, so retire the grant -- but only if the file on disk
+  // is still THIS grant. Without the id check, a claimant that exhausted an old
+  // budget would delete a grant the operator had just issued.
+  if (stillCurrent(g.id)) {
+    try { rmSync(GRANT_FILE, { force: true }); } catch {}
+    clearTickets();
+  }
   return null;
 }
 

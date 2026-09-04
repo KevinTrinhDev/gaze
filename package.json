@@ -14,7 +14,8 @@
     "test:mcp": "node test/mcp-selftest.mjs",
     "demo": "node demo/record-demo.mjs",
     "test:launcher": "node test/launcher-selftest.mjs",
-    "test:all": "node test/selftest.mjs && node test/launcher-selftest.mjs && node test/firefox-selftest.mjs && node test/mcp-selftest.mjs"
+    "test:all": "node test/selftest.mjs && node test/launcher-selftest.mjs && node test/consent-selftest.mjs && node test/firefox-selftest.mjs && node test/mcp-selftest.mjs",
+    "test:consent": "node test/consent-selftest.mjs"
   },
   "engines": {
     "node": ">=18"

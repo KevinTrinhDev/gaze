@@ -228,8 +228,11 @@ gaze log --n 20        # raw recent entries
 Local JSONL, mode 600, nothing leaves the machine, `GAZE_LOG=off` disables it.
 **Values are redacted**: `fill` values, `eval` scripts and `login` arguments
 never reach the log, because a log that quietly accumulates passwords is worse
-than no log. `goto` URLs keep their origin and path but have their query string
-and fragment stripped, since that is where magic-link and OAuth tokens live.
+than no log. `goto` URLs keep their origin and path but have their query string,
+fragment and any userinfo stripped, since that is where magic-link tokens,
+OAuth codes and signed-URL signatures live. A secret embedded in the path
+itself does survive: stripping the path too would leave entries that say
+nothing. Use `GAZE_LOG=off` for a run where even that matters.
 
 ## Settings
 

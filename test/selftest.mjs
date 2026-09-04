@@ -211,6 +211,13 @@ try {
   const denied = gated('fill', 'input[name="email"]', 'blocked@example.test');
   check('write action with no terminal is refused', denied.code === 3, 'exit ' + denied.code);
   check('refusal explains how to run unattended', denied.out.includes('GAZE_APPROVAL=off'));
+  // A SELECTOR literally called "--yes" must not approve its own write. This is
+  // the injection path: a caller that builds selectors from page content could
+  // otherwise be steered into consenting on the page's behalf.
+  const spoof = gated('fill', '--', '--yes', 'spoofed@example.test');
+  check('a selector named --yes cannot approve its own write', spoof.code === 3,
+        `exit ${spoof.code}`);
+
   const allowed = gated('fill', 'input[name="email"]', 'allowed@example.test', '--yes');
   check('--yes pre-approves the action', allowed.code === 0, 'exit ' + allowed.code);
   const readOk = gated('text', '--max', '50');
@@ -263,6 +270,13 @@ try {
   check('the budget is actually usable under contention, not deadlocked',
         wonRace === BUDGET, `${wonRace} of ${BUDGET} used`);
   gated('revoke');
+
+  // An unlimited grant is re-checked after it is read, so a revoke that lands
+  // first wins rather than being outrun by a claim already in flight.
+  gated('grant', '--minutes', '5', '--yes');
+  gated('revoke');
+  check('a write after revoke is refused, even with an unlimited grant issued',
+        gated('fill', 'input[name="email"]', 'after@example.test').code === 3);
 
   gated('grant', '--minutes', '5', '--yes');
   check('revoke clears a standing approval',
