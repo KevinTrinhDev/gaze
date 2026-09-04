@@ -299,8 +299,16 @@ DESKTOP
     ;;
 
   stop)   bash "$D/killauto.sh" "$PORT" ;;
-  status) up && { curl -s "http://127.0.0.1:$PORT/json/version" | head -c 200; echo; } \
-              || echo "not running" ;;
+  status)
+    if ! up; then
+      echo "not running"
+    elif [ "$FAMILY" = firefox ]; then
+      echo "up on :$PORT ($NAME, firefox, WebDriver BiDi)"
+    else
+      curl -s "http://127.0.0.1:$PORT/json/version" | head -c 200
+      echo
+    fi
+    ;;
 
   sync)
     # Refresh stored logins from the everyday profile.

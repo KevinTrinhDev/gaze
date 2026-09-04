@@ -102,6 +102,8 @@ try {
         /--class[= ]gaze/.test(launcherSrc) &&
         (launcherSrc.match(/--class[= ]gaze/g) || []).length >= 2,
         'chromium and firefox branches must both set it');
+  check('Firefox status reports BiDi instead of querying Chromium metadata',
+        launcherSrc.includes('($NAME, firefox, WebDriver BiDi)'));
 
   // ---- a stale profile lock must not look like a browser that died ---------
   // When a browser exits uncleanly it leaves SingletonLock behind. The next
