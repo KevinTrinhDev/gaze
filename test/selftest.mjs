@@ -128,6 +128,19 @@ try {
   check('an unmatchable selector still fails, and says what it tried',
         noMatch.includes('no element matched') && noMatch.includes('tried'), noMatch.trim().slice(0, 70));
 
+  // ---- obstructed click: the pattern that dominates real click failures ----
+  // A visible synthetic control under a transparent overlay. locate() finds it,
+  // a normal click fails the pointer-events check, and the escalation has to
+  // reach the TARGET rather than the veil sitting on top of it.
+  ab('goto', url + 'obstructed', '--wait', '400');
+  const obstructed = ab('click', '#target', '--timeout', '3000');
+  check('an obstructed click escalates instead of just timing out',
+        obstructed.includes('dispatched a DOM click'), obstructed.trim().slice(0, 80));
+  const landed = ab('scrape', '#result', '--raw').trim();
+  check('the escalated click reaches the target, not the overlay',
+        landed.includes('target clicked'), landed.slice(0, 60));
+  ab('goto', url, '--wait', '400');
+
   // ---- recording ----
   // mp4 is documented as optional: frames are the source of truth and a
   // missing ffmpeg still exits 0. Asserting mp4 unconditionally made the

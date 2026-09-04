@@ -105,6 +105,36 @@ async function locate(p, sel, { text = false, timeout = 8000 } = {}) {
                   attempts.map(a => a[0]).join(', '));
 }
 
+// A click fails in two very different ways, and they deserve different answers.
+// locate() finding nothing is a real miss and must stay a failure. But an
+// element that IS found and visible and still times out is usually Playwright's
+// actionability check refusing a synthetic control: the pattern that shows up
+// repeatedly in real logs is <div role="button" tabindex="-1"> on Google's
+// admin consoles, where the element resolves and then burns the full timeout.
+// So escalate in a fixed order, and always name the route in the output. This
+// is the same adaptive-not-agentic contract as locate(): no model, fixed order,
+// and it never turns a genuine miss into a silent success.
+const NOT_ACTIONABLE =
+  /Timeout .*exceeded|intercepts pointer events|not stable|outside of the viewport|not visible|element is disabled/i;
+
+async function clickEscalating(loc, timeout) {
+  try {
+    await loc.click({ timeout });
+    return '';
+  } catch (e) {
+    // A miss, a detach or a navigation is not an actionability problem.
+    if (!NOT_ACTIONABLE.test(String(e.message))) throw e;
+  }
+  // Deliberately NOT click({ force: true }) here. force skips the actionability
+  // checks but still dispatches a real mouse event at the element's box, so on
+  // an element that is covered it clicks whatever is on top instead. On a
+  // browser holding live sessions, silently clicking the wrong control is a
+  // worse outcome than failing. A DOM click is dispatched on the located
+  // element itself and cannot mis-target, so that is the only escalation.
+  await loc.evaluate(el => el.click());
+  return ' (dispatched a DOM click)';
+}
+
 // One retry on a transient failure. Pages navigate mid-action, elements detach,
 // animations move things. A single quick retry fixes most of it and never hides
 // a real failure, because the second error is the one reported.
@@ -451,9 +481,11 @@ async function dispatch(ctx, argv) {
       const sel = positional[0];
       const { loc, how } = await withRetry(
         () => locate(p, sel, { text: has('text'), timeout: Number(flag('timeout', 15000)) }));
-      await withRetry(() => loc.click({ timeout: Number(flag('timeout', 15000)) }));
+      const note = await withRetry(
+        () => clickEscalating(loc, Number(flag('timeout', 15000))));
       await p.waitForTimeout(Number(flag('wait', 1200)));
-      console.log(`clicked: ${sel}${how === 'selector' ? '' : ` (matched by ${how})`} | now: ${p.url()}`);
+      console.log(`clicked: ${sel}${how === 'selector' ? '' : ` (matched by ${how})`}` +
+                  `${note} | now: ${p.url()}`);
       break;
     }
     case 'fill': {

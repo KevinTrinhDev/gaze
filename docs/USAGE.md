@@ -84,6 +84,17 @@ gaze download "a.download-link"
 
 All of these are write actions, so they ask first. See **Consent** below.
 
+`click` escalates once, and says so. Some controls are visible but refuse a
+normal click: a synthetic `<div role="button">` under a transparent overlay is
+the common case on admin consoles. Rather than burn the whole timeout, gaze
+dispatches a DOM click on the element it already located, and appends
+`(dispatched a DOM click)` to the output so the escalation is never silent.
+
+It deliberately does **not** force a mouse click. A forced click still fires at
+the element's coordinates, so on a covered element it would hit whatever sits on
+top. On a browser holding live sessions, clicking the wrong control silently is
+worse than failing. A selector that matches nothing still fails, as before.
+
 ## Screenshots and recording
 
 ```bash
@@ -102,8 +113,10 @@ cleanly and says why.
 
 ## Consent
 
-Reads never prompt. Writes (`click`, `fill`, `press`, `download`, `eval`, `login`)
-do, showing the action and the page it will run on.
+Reads never prompt. Writes (`click`, `fill`, `press`, `download`, `eval`,
+`login`, `upload`, `record`, and `session load`) do, showing the action and the
+page it will run on. `session list` stays ungated: it shows only the names of
+saved sessions, never their contents.
 
 ```bash
 GAZE_APPROVAL=prompt        # ask on the terminal (default)

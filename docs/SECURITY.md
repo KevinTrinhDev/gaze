@@ -107,8 +107,10 @@ None of this is a proof. Treat scraped content as hostile input, always.
 Every capability stays enabled. The gate governs *consent*, not power.
 
 - Read commands never prompt.
-- Write commands (`click`, `fill`, `press`, `download`, `eval`, `login`) prompt,
-  showing the actions and the page they will run on.
+- Write commands (`click`, `fill`, `press`, `download`, `eval`, `login`,
+  `upload`, `record`, and `session load`) prompt, showing the actions and the
+  page they will run on. `session list` stays ungated because it reveals only
+  the names of saved sessions, never their contents.
 - `batch` prompts once for a whole script.
 - `GAZE_APPROVAL=fingerprint` requires a biometric touch via `fprintd-verify`.
 - With no terminal and no explicit `off` or `--yes`, writes are **refused**. Failing
