@@ -309,7 +309,14 @@ DESKTOP
     # without a browser installed, which is every clean CI runner.
     AUTH=$(assert_clone "$AUTH") || exit 1
     [ -d "$LIVE" ] || { echo "no $NAME profile at $LIVE"; exit 1; }
-    bash "$D/killauto.sh" "$PORT" >/dev/null 2>&1; sleep 2
+    # killauto now waits for the port to actually close and escalates to
+    # SIGKILL, so a blind `sleep 2` is no longer the thing standing between a
+    # still-flushing browser and `rm -rf` on its profile. If it cannot free the
+    # port, stop: deleting a live profile is how a sync corrupts one.
+    if ! bash "$D/killauto.sh" "$PORT" >/dev/null 2>&1; then
+      echo "the automation browser on :$PORT would not exit; not touching $AUTH" >&2
+      exit 1
+    fi
     rm -rf "$AUTH"   || { echo "could not clear $AUTH"; exit 1; }
     mkdir -p "$AUTH" || { echo "could not create $AUTH"; exit 1; }
     if [ "$FAMILY" = firefox ]; then

@@ -384,16 +384,57 @@ function spendGrant(g) {
   if (g.actions <= 0) { try { rmSync(GRANT_FILE, { force: true }); } catch {} }
   else writeGrant(g);
 }
+
+// Reading the grant and spending it has to be ONE step. Two gaze processes
+// running at once would otherwise both read "5 actions left", both write 4, and
+// a budget of 5 would fund an unbounded number of writes. For the one file
+// whose whole purpose is bounding consent, a lost update is a gate failure, so
+// the claim is serialised with an O_EXCL lockfile.
+const LOCK_FILE = `${GRANT_FILE}.lock`;
+const napper = new Int32Array(new SharedArrayBuffer(4));
+const nap = ms => { Atomics.wait(napper, 0, 0, ms); };
+
+function withGrantLock(fn) {
+  mkdirSync(`${homedir()}/.local/share/gaze`, { recursive: true });
+  for (let i = 0; i < 100; i++) {
+    let fd;
+    try {
+      fd = openSync(LOCK_FILE, 'wx', 0o600);
+    } catch {
+      // A process killed mid-claim would otherwise wedge the gate forever.
+      try {
+        if (Date.now() - statSync(LOCK_FILE).mtimeMs > 5000)
+          rmSync(LOCK_FILE, { force: true });
+      } catch {}
+      nap(20);
+      continue;
+    }
+    try { return fn(); }
+    finally {
+      try { closeSync(fd); } catch {}
+      try { rmSync(LOCK_FILE, { force: true }); } catch {}
+    }
+  }
+  // Failing closed: if the gate cannot be held exclusively, it has not approved.
+  throw new Error('could not acquire the approval lock; refusing to assume consent');
+}
+
+// Returns the grant it actually claimed, or null when there is none to claim.
+const claimGrant = () => withGrantLock(() => {
+  const g = readGrant();
+  if (!g) return null;
+  spendGrant(g);
+  return g;
+});
 const grantLeft = g =>
   `${Math.max(0, Math.round((g.expires - Date.now()) / 60000))} min` +
   (g.actions === null ? ', unlimited actions' : `, ${g.actions} actions`);
 
 function approve(actions, where) {
   if (APPROVAL === 'off') return true;
-  const granted = readGrant();
+  const granted = claimGrant();
   if (granted) {
     process.stderr.write(`  [standing approval: ${grantLeft(granted)}]\n`);
-    spendGrant(granted);
     return true;
   }
   const lines = actions.map(a => `    ${a}`).join('\n');

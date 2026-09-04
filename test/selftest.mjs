@@ -2,7 +2,7 @@
 // Runs against a THROWAWAY headless chromium on its own port and profile.
 // It never touches the real Brave clone, so it is safe to run at any time.
 import { chromium } from 'playwright';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, execFile, spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -205,6 +205,35 @@ try {
   check('second write also runs unprompted', g2.code === 0, 'exit ' + g2.code);
   const g3 = gated('fill', 'input[name="email"]', 'granted3@example.test');
   check('grant is spent after its action budget', g3.code === 3, 'exit ' + g3.code);
+  // ---- stress: a grant budget must survive concurrent processes ------------
+  // readGrant() then spendGrant() used to be an unlocked read-modify-write, so
+  // two processes racing could each read the same remaining count and each
+  // write count-1, letting a budget of 3 fund more than 3 writes. For the one
+  // file whose job is bounding consent, a lost update is a gate failure.
+  //
+  // Be honest about what this test is: a REGRESSION GUARD, not a reproduction.
+  // It passes against the unlocked version too, because each racer spends
+  // hundreds of milliseconds starting Node and attaching to the browser, so a
+  // microsecond-wide window rarely collides. What it does prove is that the
+  // lock never overspends the budget and never deadlocks under contention,
+  // which is what would break if the locking were done wrong.
+  gated('revoke');
+  const BUDGET = 3, RACERS = 12;
+  gated('grant', '--minutes', '5', '--actions', String(BUDGET), '--yes');
+  const raced = await Promise.all(
+    Array.from({ length: RACERS }, (_, i) => new Promise(resolve => {
+      execFile('node',
+        [join(DIR, '..', 'gaze.mjs'), 'fill', 'input[name="email"]', `race${i}@example.test`],
+        { env: { ...process.env, GAZE_PORT: String(PORT) } },
+        err => resolve(err ? (err.code ?? 1) : 0));
+    })));
+  const wonRace = raced.filter(c => c === 0).length;
+  check(`a grant budget of ${BUDGET} is not overspent by ${RACERS} concurrent writes`,
+        wonRace <= BUDGET, `${wonRace} writes were allowed`);
+  check('the budget is actually usable under contention, not deadlocked',
+        wonRace === BUDGET, `${wonRace} of ${BUDGET} used`);
+  gated('revoke');
+
   gated('grant', '--minutes', '5', '--yes');
   check('revoke clears a standing approval',
         gated('revoke').out.includes('revoked') && gated('grant-status').out.includes('no standing'));

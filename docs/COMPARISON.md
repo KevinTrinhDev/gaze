@@ -109,7 +109,7 @@ Said plainly, because a comparison that only flatters is not useful.
   biometrics. macOS and Windows are unimplemented, not merely untested.
 - **Stealth is one fix deep.** The Patchright swap removes the `Runtime.enable`
   tell. That is all. This is not a stealth product and does not pretend to be one.
-- **Maturity.** Days old, one author, 139 tests. The alternatives have years and
+- **Maturity.** Days old, one author, 141 tests. The alternatives have years and
   companies behind them.
 
 ---
