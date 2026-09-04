@@ -70,6 +70,15 @@ function pick(ctx, idx) {
   const real = pages.filter(p => !/^about:blank$/.test(p.url()));
   return real.length ? real[real.length - 1] : pages[0];
 }
+// process.exit() tears the process down without waiting for stdout to DRAIN.
+// To a terminal that is harmless, because those writes are synchronous, but to
+// a PIPE they are not: the last write can be discarded, and a caller reading
+// our output sees an empty string and concludes the command printed nothing.
+// Making the stream blocking costs nothing here (we print once and leave) and
+// removes the failure mode everywhere, without restructuring every early exit.
+try { process.stdout._handle?.setBlocking?.(true); } catch {}
+try { process.stderr._handle?.setBlocking?.(true); } catch {}
+
 const stamp = () => new Date().toISOString().replace(/[:.]/g, '-');
 
 function guard(url, what) {

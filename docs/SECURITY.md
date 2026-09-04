@@ -113,6 +113,11 @@ Every capability stays enabled. The gate governs *consent*, not power.
   the names of saved sessions, never their contents.
 - `batch` prompts once for a whole script.
 - `GAZE_APPROVAL=fingerprint` requires a biometric touch via `fprintd-verify`.
+- Consent is never inferred from data. `--yes` counts only as a real flag, never
+  as a positional after `--` and never as the value of another flag, and
+  `GAZE_YES=1` exists so a programmatic caller can approve without putting
+  consent anywhere page-derived text can reach. The MCP server passes every
+  model-supplied string after `--` for the same reason.
 - With no terminal and no explicit `off` or `--yes`, writes are **refused**. Failing
   closed is the point: an unattended agent must be configured deliberately.
 

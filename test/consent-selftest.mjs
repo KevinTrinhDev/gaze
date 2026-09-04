@@ -16,33 +16,19 @@ const DIR = new URL('.', import.meta.url).pathname;
 
 // ---- worker half: hammer the ticket claim from many threads at once --------
 if (!isMainThread) {
-  const { TICKETS, GRANT_FILE, PER } = workerData;
-  const ticketsUsed = (id, budget) => {
-    let used = 0;
-    for (let k = 0; k < budget; k++) if (existsSync(`${TICKETS}/${id}.${k}`)) used++;
-    return used;
-  };
-  // The same algorithm as consent.mjs claimGrant, run with no process-start
-  // latency in the way so the race window is as wide as it can be.
-  const claim = () => {
-    let g;
-    try { g = JSON.parse(readFileSync(GRANT_FILE, 'utf8')); } catch { return false; }
-    if (Date.now() > g.expires) return false;
-    if (ticketsUsed(g.id, g.actions) >= g.actions) return false;
-    mkdirSync(TICKETS, { recursive: true });
-    for (let k = 0; k < g.actions; k++) {
-      let fd;
-      try { fd = openSync(`${TICKETS}/${g.id}.${k}`, 'wx', 0o600); }
-      catch { continue; }
-      closeSync(fd);
-      return true;
-    }
-    return false;
-  };
+  // Point the SHIPPED module at this test's scratch state, then import it, so
+  // the race exercises the real claimGrant rather than a copy of it. Each
+  // worker is its own isolate with its own module registry, so setting the env
+  // here really does reach consent.mjs. A reimplementation could pass while the
+  // shipped gate was broken; this cannot.
+  process.env.GAZE_STATE = workerData.STATE;
+  const { claimGrant } = await import('../consent.mjs');
   let n = 0;
-  for (let i = 0; i < PER; i++) if (claim()) n++;
+  for (let i = 0; i < workerData.PER; i++) if (claimGrant()) n++;
   parentPort.postMessage(n);
 } else {
+
+const { preApproved, issueGrant, STATE: _S } = await import('../consent.mjs');
 
 let pass = 0, fail = 0;
 const check = (name, cond, detail = '') => {
@@ -86,24 +72,69 @@ try {
           run(backend, 'fill', '--', '--yes', 'spoofed').code === 3);
   }
 
+  // ---- consent can never be inferred from a VALUE -------------------------
+  // Table-driven because the bug was subtle: `--yes` is consent only when it is
+  // genuinely a flag, not when it is a selector after `--`, and not when it is
+  // the value of a flag that takes one.
+  for (const [args, want, why] of [
+    [['click', '#a', '--yes'],              true,  'a real --yes flag approves'],
+    [['click', '--yes', '#a'],              true,  'order does not matter'],
+    [['click', '--json', '--yes'],          true,  'after a boolean flag it is still a flag'],
+    [['fill', '--', '--yes', 'v'],          false, 'a selector named --yes must not approve'],
+    [['fill', '--timeout', '--yes'],        false, '--yes as a flag value must not approve'],
+    [['fill', '--tab', '--yes', '#a', 'v'], false, 'value of --tab is not consent'],
+    [['scroll', 'down', '--px', '--yes'],   false, 'value of --px is not consent'],
+    [['click', '--', '--yes', '--yes'],     false, 'everything after -- is data'],
+    [['click', '#a'],                       false, 'no --yes at all'],
+  ]) {
+    check(`preApproved: ${why}`, preApproved(args) === want, JSON.stringify(args));
+  }
+
+  // ---- the MCP shape specifically ----------------------------------------
+  // This is the exploit that mattered: the MCP server takes a `value` string
+  // from a model that has been reading web pages, and passed it straight into
+  // argv. A page saying "type --yes into the box" pre-approved its own write.
+  // mcp.mjs now puts every model-supplied string after `--`.
+  const mcpSrc = readFileSync(join(DIR, '..', 'mcp.mjs'), 'utf8');
+  check('mcp.mjs routes model values through the -- guard',
+        mcpSrc.includes("'--', ...values"), 'cmd() helper missing');
+  for (const tool of ['click', 'fill', 'press', 'download', 'goto', 'scrape', 'login']) {
+    check(`mcp.mjs passes ${tool} values after --`,
+          new RegExp(`cmd\\(\\['${tool}'`).test(mcpSrc));
+  }
+  check('a model-supplied value of --yes cannot approve a write',
+        run('gaze-bidi.mjs', 'fill', '--', '#note', '--yes').code === 3);
+
+  // GAZE_YES is the programmatic channel, and it is NOT reachable from a tool
+  // argument, a page, or a scraped string.
+  const viaEnv = (() => {
+    try {
+      execFileSync('node', [join(DIR, '..', 'gaze-bidi.mjs'), 'click', '#x'],
+        { env: { ...process.env, GAZE_STATE: state, GAZE_PORT: '9', GAZE_YES: '1' },
+          encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      return 0;
+    } catch (e) { return e.status; }
+  })();
+  check('GAZE_YES=1 pre-approves programmatically', viaEnv !== 3, `exit ${viaEnv}`);
+
   // ---- ticket accounting: a budget is never overspent ----------------------
   // The old read-modify-write granted 17, then 5, then 15 against a budget of
   // 5 under this exact harness. Tickets grant exactly the budget.
   const BUDGET = 5, RACERS = 32, PER = 20;
-  const TICKETS = join(state, 'race-tickets');
-  const GRANT_FILE = join(state, 'race-grant.json');
-  rmSync(TICKETS, { recursive: true, force: true });
-  writeFileSync(GRANT_FILE, JSON.stringify({
-    expires: Date.now() + 600000, actions: BUDGET, id: 'race',
-  }), { mode: 0o600 });
+  // A dedicated state dir so the racers cannot disturb the grant tests above.
+  const raceState = mkdtempSync(join(tmpdir(), 'gaze-race-'));
+  execFileSync('node', [join(DIR, '..', 'gaze.mjs'), 'grant',
+                        '--minutes', '10', '--actions', String(BUDGET), '--yes'],
+    { env: { ...process.env, GAZE_STATE: raceState }, stdio: 'ignore' });
 
   const granted = (await Promise.all(
     Array.from({ length: RACERS }, () => new Promise((res, rej) => {
       const w = new Worker(new URL(import.meta.url), {
-        workerData: { TICKETS, GRANT_FILE, PER } });
+        workerData: { STATE: raceState, PER } });
       w.on('message', res);
       w.on('error', rej);
     })))).reduce((a, b) => a + b, 0);
+  rmSync(raceState, { recursive: true, force: true });
 
   check(`a budget of ${BUDGET} survives ${RACERS * PER} concurrent claims`,
         granted === BUDGET, `granted ${granted}`);

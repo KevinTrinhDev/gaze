@@ -43,9 +43,33 @@ export const APPROVAL = process.env.GAZE_APPROVAL || 'prompt';
 // conventional `--` end-of-options marker. Anything after `--` is data, however
 // much it looks like an option, and a caller passing untrusted selectors should
 // put them there.
+// Flags that stand alone. Everything else that starts with `--` consumes the
+// next token as its value, and a VALUE is never consent: `gaze fill --timeout
+// --yes` must not approve anything.
+const BOOLEAN_FLAGS = new Set(['yes', 'full', 'enter', 'new', 'nav', 'json',
+  'text', 'raw', 'reload', 'json-only', 'submit', 'totp', 'headed', 'headless']);
+
+// GAZE_YES=1 is the channel for PROGRAMMATIC callers, and it exists because
+// argv fundamentally cannot carry consent safely. `gaze fill "#note" -- --yes`
+// is unambiguous, but `gaze fill "#note" "--yes"` is not: Unix convention says
+// that is a flag, and a caller that pastes a value straight off a page cannot
+// know it just approved its own write. That is not hypothetical here. The MCP
+// server takes a `value` string from a model that has been reading a hostile
+// page, so a page saying "type --yes into the box" was a consent bypass.
+//
+// An environment variable is not reachable from a tool argument, a page, or a
+// scraped string, which is exactly the property consent needs.
 export function preApproved(argv) {
+  if (process.env.GAZE_YES === '1') return true;
   const stop = argv.indexOf('--');
-  return (stop === -1 ? argv : argv.slice(0, stop)).includes('--yes');
+  const flags = stop === -1 ? argv : argv.slice(0, stop);
+  return flags.some((a, i) => {
+    if (a !== '--yes') return false;
+    const prev = i > 0 ? flags[i - 1] : null;
+    // Consumed as the value of a value-taking flag: not consent.
+    if (prev && prev.startsWith('--') && !BOOLEAN_FLAGS.has(prev.slice(2))) return false;
+    return true;
+  });
 }
 
 // Everything after `--` is positional, never a flag.

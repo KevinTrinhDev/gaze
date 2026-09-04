@@ -292,7 +292,7 @@ npm run test:mcp
 npm run demo
 ```
 
-171 checks, run on every push and pull request. Every suite launches a disposable
+190 checks, run on every push and pull request. Every suite launches a disposable
 browser with a temporary profile on its own port, so **none of them touches a
 real profile**.
 
