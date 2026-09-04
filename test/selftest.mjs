@@ -133,6 +133,28 @@ try {
   check('an unmatchable selector still fails, and says what it tried',
         noMatch.includes('no element matched') && noMatch.includes('tried'), noMatch.trim().slice(0, 70));
 
+  // ---- scroll ---------------------------------------------------------
+  // There was no scroll command at all, which for a scraping tool means no way
+  // to reach lazily-loaded content below the fold.
+  ab('goto', url + 'tall', '--wait', '400');
+  const atTop = ab('scroll', 'top');
+  check('scroll top reports its position', /at 0px of \d+px/.test(atTop), atTop.trim());
+  const down = ab('scroll', 'down', '--px', '500');
+  check('scroll down moves the page', /at (?!0px)\d+px/.test(down), down.trim());
+  const bottom = ab('scroll', 'bottom');
+  const mB = /at (\d+)px of (\d+)px/.exec(bottom);
+  check('scroll bottom reaches the end', mB && mB[1] === mB[2], bottom.trim());
+  const up = ab('scroll', 'up', '--px', '100000');
+  check('scroll up clamps at the top', /at 0px/.test(up), up.trim());
+  const toEl = ab('scroll', 'to', '#deep');
+  check('scroll to an element brings it into view',
+        toEl.includes('scrolled to #deep'), toEl.trim());
+  let badScroll = '';
+  try { ab('scroll', 'sideways'); } catch (e) { badScroll = (e.stdout||'') + (e.stderr||''); }
+  check('an unknown scroll direction is explained, not ignored',
+        badScroll.includes('expected up, down, top, bottom'), badScroll.trim().slice(0, 60));
+  ab('goto', url, '--wait', '400');
+
   // ---- obstructed click: the pattern that dominates real click failures ----
   // A visible synthetic control under a transparent overlay. locate() finds it,
   // a normal click fails the pointer-events check, and the escalation has to
@@ -291,6 +313,15 @@ try {
   check('secrets are redacted in the log',
         !rawLog.includes('granted1@example.test') || rawLog.includes('<redacted>'));
   const fillEntries = ab('log', '--n', '200').split('\n').filter(l => l.includes('"fill"'));
+  // A magic-link or OAuth URL carries its secret in the query string, and this
+  // log persists on disk.
+  ab('goto', url + '?token=SUPERSECRETVALUE&next=/x', '--wait', '300');
+  const gotoLog = ab('log', '--n', '40');
+  check('goto query strings are stripped from the log',
+        !gotoLog.includes('SUPERSECRETVALUE') && gotoLog.includes('<redacted>'),
+        gotoLog.split('\n').filter(l => l.includes('goto')).slice(-1)[0] || '');
+  ab('goto', url, '--wait', '300');
+
   check('fill values never reach the log',
         fillEntries.length > 0 && fillEntries.every(l => !l.includes('@example.test')),
         `${fillEntries.length} fill entries`);

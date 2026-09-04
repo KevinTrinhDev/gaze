@@ -20,8 +20,8 @@ shell, or from an AI agent over MCP.
 
 <img src="docs/demo.gif" alt="gaze reading a page, catching a prompt-injection attempt, and refusing a write until approved" width="100%">
 
-Scores **100/100, grade S** on an [independent obstacle course](docs/GAUNTLET.md)
-of twelve anti-scraping levels, including the one that tries to hijack the agent
+Scores **100/100, grade S** on a [12-level obstacle course](docs/GAUNTLET.md)
+of anti-scraping challenges, including the one that tries to hijack the agent
 reading it. Perfect correctness, perfect conduct, 17s against a 180s par.
 
 ---
@@ -105,6 +105,42 @@ gaze version
 
 ---
 
+## What it can and cannot do
+
+Honest answers, including the noes. Everything marked ✅ has a test behind it.
+
+| | Capability | |
+|---|---|---|
+| ✅ | **Click, type, fill, submit** | `click`, `fill`, `press`. Selectors heal themselves, and a control that resolves but refuses a normal click gets one DOM-click escalation |
+| ✅ | **Scroll a page** | `scroll up\|down\|top\|bottom\|to`, in CSS pixels or to an element |
+| ✅ | **Read text, HTML, tables, links** | `text`, `html`, `table`, `links`, `scrape`. Always wrapped as untrusted and injection-scanned |
+| ✅ | **Map what is clickable** | `map` walks shadow DOM and same-origin frames, and hands back a reusable selector per element |
+| ✅ | **Screenshots** | `shot`, viewport or full page, written mode 600 |
+| ✅ | **Screen recording** | `record`. A timed screenshot loop, not a video stream. Frames always survive; mp4 needs ffmpeg and is optional |
+| ✅ | **Download and upload files** | `download`, `upload` |
+| ✅ | **Save and restore sessions** | `session save\|load\|list`, cookies plus localStorage, mode 600 |
+| ✅ | **Log in as you** | `login` fills from Bitwarden, including TOTP, using a vault session *you* unlocked |
+| ✅ | **Stay logged in** | It drives a clone of your everyday profile, so Google, GitHub and the rest are already signed in. No credential is needed to act: it inherits one |
+| ✅ | **Read your email** | `goto mail.google.com` then `text`. It works because the session is already yours |
+| ✅ | **Run fully unattended** | `gaze grant` for a bounded standing approval, or `--yes`, or `GAZE_APPROVAL=off` |
+| ✅ | **Detect a CAPTCHA** | `challenge` spots reCAPTCHA, hCaptcha, Turnstile, Cloudflare interstitials, PerimeterX and DataDome, and tells a *challenge* apart from a *block* |
+| ✅ | **Hand a CAPTCHA to a human** | `wait-human` pauses until you clear it in the visible window, then carries on in the same session |
+| ❌ | **Solve a CAPTCHA** | Deliberately never. No solver services. That is bot-detection evasion and it risks the accounts |
+| ✅ | **Read console and network** | `console`, `network`. `--json-only` finds the JSON API a page already calls |
+| ✅ | **Run JavaScript in the page** | `eval` |
+| ✅ | **Many tabs** | `tabs`, `goto --new`, `--tab N` |
+| ✅ | **Resist prompt injection** | Page content comes back in an envelope, flagged, and is never treated as instruction |
+| ➖ | **Avoid bot detection** | One fix deep: Patchright removes the `Runtime.enable` tell and automation flags are off. There is no fingerprint, canvas or proxy spoofing, and there never will be |
+| ❌ | **Swipe and touch gestures** | Not implemented |
+| ❌ | **Windows** | Linux and macOS. Windows only under WSL |
+
+Firefox does the reading, mapping, clicking, filling, screenshots and CAPTCHA
+detection, under the same consent gate and the same untrusted envelope. The
+Chromium backend additionally has `press`, `download`, `upload`, `record`,
+`table`, `console`, `network`, `session`, `login`, `batch` and `indicator`.
+
+---
+
 <details>
 <summary><b>All commands</b></summary>
 
@@ -119,8 +155,8 @@ gaze version
 | `map` | interactive elements, each with a reusable selector |
 | `scrape` `links` `table` | extract structured data |
 | `console` `network` | page logs, and the JSON API a page already calls |
-| `shot` `record` | screenshot, and bounded video capture |
-| `click` `fill` `press` `upload` `download` | interact |
+| `shot` `record` | screenshot, and a bounded timed screenshot loop (mp4 if ffmpeg is present) |
+| `click` `fill` `press` `scroll` `upload` `download` | interact |
 | `eval` | run JS in the page |
 | `login` | fill credentials from Bitwarden |
 | `session` `grant` `revoke` | save state, approve once |
@@ -252,7 +288,7 @@ npm run test:mcp
 npm run demo
 ```
 
-141 checks, run on every push and pull request. Every suite launches a disposable
+158 checks, run on every push and pull request. Every suite launches a disposable
 browser with a temporary profile on its own port, so **none of them touches a
 real profile**.
 

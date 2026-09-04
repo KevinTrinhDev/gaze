@@ -33,6 +33,12 @@ const PAGE = `<!doctype html><title>fixture</title>
   });
 </script>`;
 const FRAME = `<!doctype html><button id="frame-btn" style="width:80px;height:20px">Frame action</button>`;
+// A page taller than any viewport, with a target far below the fold, so the
+// scroll command has somewhere to actually go.
+const TALL = `<!doctype html><title>tall</title>
+<div style="height:4000px">top</div>
+<button id="deep" style="width:120px;height:30px">Deep control</button>
+<div style="height:4000px">bottom</div>`;
 // The shape that actually shows up in real logs on Google's admin consoles: a
 // synthetic control that is visible, so locate() finds it, but sits under a
 // transparent overlay, so a normal click fails the pointer-events check and
@@ -95,6 +101,7 @@ createServer((req, res) => {
   if (req.url === '/blocked') return res.end(BLOCKED);
   if (req.url === '/injected') return res.end(INJECTED);
   if (req.url === '/obstructed') return res.end(OBSTRUCTED);
+  if (req.url === '/tall') return res.end(TALL);
   res.end(PAGE);
 }).listen(0, '127.0.0.1', function () {
   process.stdout.write(`PORT ${this.address().port}\n`);

@@ -78,6 +78,8 @@ gaze click "#signin"
 gaze click "Sign in" --text        # match visible text instead
 gaze fill "input[name=email]" you@example.com --enter
 gaze press Enter
+gaze scroll down --px 800          # up | down | top | bottom
+gaze scroll to "#pricing"          # bring an element into view
 gaze upload "#attachment" ./report.pdf
 gaze download "a.download-link"
 ```
@@ -165,8 +167,11 @@ gaze login github.com --totp
 by a human action, and `gaze` is a CLI that agents drive: letting it run
 `bw unlock` would hand any agent the ability to unlock your vault on its own.
 
-Secrets never touch argv, stdout, or the log. It also refuses to type into a
-password manager's own web UI.
+Secrets never touch argv, stdout, or the log: the vault session is handed to
+`bw` through the environment, not on its command line, so it is not sitting in
+`ps` while the call runs. `login` also refuses to run on a password manager's
+own web UI. That guard is on `login` specifically, so a plain `fill` there is
+not blocked.
 
 ## Sessions
 
@@ -221,8 +226,10 @@ gaze log --n 20        # raw recent entries
 ```
 
 Local JSONL, mode 600, nothing leaves the machine, `GAZE_LOG=off` disables it.
-**Values are redacted**: `fill` values and `login` arguments never reach the log,
-because a log that quietly accumulates passwords is worse than no log.
+**Values are redacted**: `fill` values, `eval` scripts and `login` arguments
+never reach the log, because a log that quietly accumulates passwords is worse
+than no log. `goto` URLs keep their origin and path but have their query string
+and fragment stripped, since that is where magic-link and OAuth tokens live.
 
 ## Settings
 
