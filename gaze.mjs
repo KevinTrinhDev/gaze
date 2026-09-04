@@ -22,7 +22,7 @@ async function driver() {
   return chromium;
 }
 import { writeFileSync, readFileSync, appendFileSync, mkdirSync, chmodSync, existsSync, rmSync, statSync,
-         openSync, readSync, writeSync, closeSync } from 'node:fs';
+         openSync, readSync, writeSync, closeSync, fstatSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
 
@@ -117,13 +117,23 @@ async function locate(p, sel, { text = false, timeout = 8000 } = {}) {
 const NOT_ACTIONABLE =
   /Timeout .*exceeded|intercepts pointer events|not stable|outside of the viewport|not visible|element is disabled/i;
 
+// Playwright's call log names each step it reached. Once "performing click
+// action" appears, the click may have been DISPATCHED and only then timed out.
+// Escalating there would click a second time, and replaying a write on a
+// browser holding live sessions is the exact failure this tool exists to
+// prevent: a double submit, a double send, a double purchase. If we cannot
+// prove the click never fired, we refuse to retry it and report the timeout.
+const MAY_HAVE_FIRED = /performing click action/i;
+
 async function clickEscalating(loc, timeout) {
   try {
     await loc.click({ timeout });
     return '';
   } catch (e) {
+    const msg = String(e.message);
     // A miss, a detach or a navigation is not an actionability problem.
-    if (!NOT_ACTIONABLE.test(String(e.message))) throw e;
+    if (!NOT_ACTIONABLE.test(msg)) throw e;
+    if (MAY_HAVE_FIRED.test(msg)) throw e;
   }
   // Deliberately NOT click({ force: true }) here. force skips the actionability
   // checks but still dispatches a real mouse event at the element's box, so on
@@ -394,17 +404,33 @@ const LOCK_FILE = `${GRANT_FILE}.lock`;
 const napper = new Int32Array(new SharedArrayBuffer(4));
 const nap = ms => { Atomics.wait(napper, 0, 0, ms); };
 
+// Releasing the lock has to unlink OUR lock, never whatever now sits at that
+// path. Naive "create with wx, rmSync in finally" has a real hole: a process
+// stalled past the stale threshold still holds its open inode while another
+// reclaims the pathname, and the stalled process's unlink then destroys the
+// NEW holder's lock, letting a third process in. So compare inodes before
+// unlinking, both when reclaiming a stale lock and when releasing our own.
+// The critical section is a sub-millisecond read-modify-write, so the stale
+// threshold is deliberately generous: it exists only to recover from a process
+// killed mid-claim, never to muscle past a lock that is legitimately busy.
+const LOCK_STALE_MS = 30000;
+
 function withGrantLock(fn) {
   mkdirSync(`${homedir()}/.local/share/gaze`, { recursive: true });
-  for (let i = 0; i < 100; i++) {
-    let fd;
+  for (let i = 0; i < 150; i++) {
+    let fd, mine;
     try {
       fd = openSync(LOCK_FILE, 'wx', 0o600);
+      mine = fstatSync(fd).ino;
     } catch {
-      // A process killed mid-claim would otherwise wedge the gate forever.
+      // Reclaim only the exact inode we observed to be stale. If it changed
+      // between the two stats, someone else already dealt with it.
       try {
-        if (Date.now() - statSync(LOCK_FILE).mtimeMs > 5000)
-          rmSync(LOCK_FILE, { force: true });
+        const seen = statSync(LOCK_FILE);
+        if (Date.now() - seen.mtimeMs > LOCK_STALE_MS) {
+          const again = statSync(LOCK_FILE);
+          if (again.ino === seen.ino) rmSync(LOCK_FILE, { force: true });
+        }
       } catch {}
       nap(20);
       continue;
@@ -412,7 +438,10 @@ function withGrantLock(fn) {
     try { return fn(); }
     finally {
       try { closeSync(fd); } catch {}
-      try { rmSync(LOCK_FILE, { force: true }); } catch {}
+      // Only unlink if the path still points at the inode we created.
+      try {
+        if (statSync(LOCK_FILE).ino === mine) rmSync(LOCK_FILE, { force: true });
+      } catch {}
     }
   }
   // Failing closed: if the gate cannot be held exclusively, it has not approved.
@@ -1172,7 +1201,12 @@ if (argv[0] === 'stats' || argv[0] === 'log') {
 if (argv[0] === 'grant' || argv[0] === 'revoke' || argv[0] === 'grant-status') {
   const gflag = (n, d) => { const i = argv.indexOf(`--${n}`); return i === -1 ? d : argv[i + 1]; };
   if (argv[0] === 'revoke') {
-    try { rmSync(GRANT_FILE, { force: true }); } catch {}
+    // Under the same lock as claimGrant. Without it, a claim already in flight
+    // could read the grant, have revoke delete it, and then write the
+    // decremented copy straight back, resurrecting an approval the operator
+    // just withdrew. Revocation has to be the last word.
+    try { withGrantLock(() => { try { rmSync(GRANT_FILE, { force: true }); } catch {} }); }
+    catch { try { rmSync(GRANT_FILE, { force: true }); } catch {} }
     console.log('standing approval revoked');
   } else if (argv[0] === 'grant-status') {
     const g = readGrant();
@@ -1186,9 +1220,13 @@ if (argv[0] === 'grant' || argv[0] === 'revoke' || argv[0] === 'grant-status') {
       console.error('ERR: not approved');
       process.exitCode = 3;
     } else {
-      writeGrant({ expires: Date.now() + mins * 60000,
-                   actions: acts === null ? null : Number(acts),
-                   issued: new Date().toISOString() });
+      // Same lock as claim and revoke: issuing a new, tighter grant must not
+      // be clobbered by an in-flight claim writing back the older budget.
+      const fresh = { expires: Date.now() + mins * 60000,
+                      actions: acts === null ? null : Number(acts),
+                      issued: new Date().toISOString() };
+      try { withGrantLock(() => writeGrant(fresh)); }
+      catch { writeGrant(fresh); }
       console.log(`standing approval active for ${mins} min` +
                   (acts ? `, ${acts} actions` : ', unlimited actions'));
       console.log('revoke early with: gaze revoke');
