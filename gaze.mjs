@@ -11,9 +11,16 @@
 // driving the operator's OWN profile on their OWN accounts, so the goal is not
 // disguise: it is removing an inconsistency between "a real human's browser" and
 // "how this browser is being talked to". Falls back to stock playwright.
+// Loaded lazily, not at module scope: importing the driver costs ~270ms, and
+// help, stats, log, grant and every unknown command never reach attach(). That
+// was 96% of the startup cost of commands that touch no browser at all.
 let chromium;
-try   { ({ chromium } = await import('patchright')); }
-catch { ({ chromium } = await import('playwright')); }
+async function driver() {
+  if (chromium) return chromium;
+  try   { ({ chromium } = await import('patchright')); }
+  catch { ({ chromium } = await import('playwright')); }
+  return chromium;
+}
 import { writeFileSync, readFileSync, appendFileSync, mkdirSync, chmodSync, existsSync, rmSync, statSync,
          openSync, readSync, writeSync, closeSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -35,7 +42,7 @@ async function attach() {
   // "connect ECONNREFUSED" stack tells the operator nothing they can act on.
   let b;
   try {
-    b = await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`);
+    b = await (await driver()).connectOverCDP(`http://127.0.0.1:${PORT}`);
   } catch (e) {
     if (/ECONNREFUSED|ENOTFOUND|ECONNRESET|socket hang up|WebSocket/i.test(e.message))
       throw new Error(`no browser is running on :${PORT}. start one with: gaze start`);
@@ -336,7 +343,9 @@ function readGrant() {
 }
 function writeGrant(g) {
   mkdirSync(`${homedir()}/.local/share/gaze`, { recursive: true });
-  writeFileSync(GRANT_FILE, JSON.stringify(g, null, 2));
+  // mode on create closes the window where the grant is briefly world-readable;
+  // the chmod still covers the case where the file already existed.
+  writeFileSync(GRANT_FILE, JSON.stringify(g, null, 2), { mode: 0o600 });
   chmodSync(GRANT_FILE, 0o600);
 }
 function spendGrant(g) {
@@ -586,7 +595,7 @@ async function dispatch(ctx, argv) {
           } catch {}
         }
         state.origins = [...seen.values()];
-        writeFileSync(file, JSON.stringify(state, null, 2));
+        writeFileSync(file, JSON.stringify(state, null, 2), { mode: 0o600 });
         chmodSync(file, 0o600);           // contains live cookies AND tokens
         const keys = state.origins.reduce((n, o) => n + o.localStorage.length, 0);
         console.log(`saved ${state.cookies.length} cookies, ${keys} localStorage key(s) across ${state.origins.length} origin(s) -> ${file}`);
