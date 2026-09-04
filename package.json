@@ -16,9 +16,13 @@
     "test:launcher": "node test/launcher-selftest.mjs",
     "test:all": "node test/selftest.mjs && node test/launcher-selftest.mjs && node test/firefox-selftest.mjs && node test/mcp-selftest.mjs"
   },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "patchright": "^1.62.2",
-    "playwright": "^1.62.1"
+    "patchright": "^1.62.3",
+    "playwright": "^1.62.1",
+    "zod": "^4.5.4"
   }
 }
