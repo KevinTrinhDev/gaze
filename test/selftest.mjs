@@ -20,6 +20,20 @@ const url = await new Promise((resolve, reject) => {
   });
 });
 
+// Refuse to start if something already owns our port. A browser left behind by
+// a crashed run will happily accept our CDP connection, and then the suite is
+// silently driving the WRONG browser: tests fail in ways that look like product
+// regressions ("no table at index 0") and change from run to run. Fail fast and
+// say how to clear it.
+const portOwner = execFileSync('bash', ['-c',
+  `ss -ltnp 2>/dev/null | grep ":${PORT} " || true`], { encoding: 'utf8' }).trim();
+if (portOwner) {
+  console.error(`port ${PORT} is already in use, so this suite would drive a ` +
+                `browser it did not start:\n  ${portOwner}\n` +
+                `clear it with:  bash killauto.sh ${PORT}`);
+  process.exit(1);
+}
+
 const profile = mkdtempSync(join(tmpdir(), 'gaze-selftest-'));
 // Give the suite its OWN state directory. Without this it read and wrote the
 // operator's real ~/.local/share/gaze: `npm test` revoked a live standing

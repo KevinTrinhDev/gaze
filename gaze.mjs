@@ -25,7 +25,7 @@ import { writeFileSync, readFileSync, appendFileSync, mkdirSync, chmodSync, exis
          openSync, readSync, writeSync, closeSync, fstatSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
-import { STATE, WRITE_CMDS, isWrite, APPROVAL, approve, askTty, preApproved, afterDashDash,
+import { STATE, WRITE_CMDS, isWrite, APPROVAL, approve, askTty, preApproved, afterDashDash, say, out,
          readGrant, claimGrant, grantLeft, remainingOf,
          issueGrant, revokeGrant, GRANT_FILE, TICKETS } from './consent.mjs';
 import { emit, sniff } from './untrusted.mjs';
@@ -963,7 +963,14 @@ async function dispatch(ctx, argv) {
       // so point the browser's own downloader at a path inside the snap home.
       const p = pick(ctx, flag('tab'));
       const fs = await import('node:fs');
-      const DL = `${homedir()}/snap/brave/current/atarla-downloads`;
+      // Staged next to the profile actually in use, not at a fixed path. A
+      // snap-confined browser can only write inside its own snap home, so the
+      // old hard-coded ~/snap/brave/... worked for exactly one packaging of one
+      // browser and silently failed for every other. It also accumulated files
+      // outside the repo that nothing ever cleaned up.
+      const profileDir = process.env.GAZE_PROFILE_DIR;
+      const DL = profileDir ? `${profileDir}/../gaze-downloads`
+                            : `${homedir()}/snap/brave/current/atarla-downloads`;
       fs.mkdirSync(DL, { recursive: true });
       fs.mkdirSync(`${DIR}downloads`, { recursive: true });
       const before = new Set(fs.readdirSync(DL));
@@ -1133,23 +1140,23 @@ if (argv[0] === 'grant' || argv[0] === 'revoke' || argv[0] === 'grant-status') {
   const gflag = (n, d) => { const i = argv.indexOf(`--${n}`); return i === -1 ? d : argv[i + 1]; };
   if (argv[0] === 'revoke') {
     revokeGrant();
-    console.log('standing approval revoked');
+    out('standing approval revoked\n');
   } else if (argv[0] === 'grant-status') {
     const g = readGrant();
-    console.log(g ? `active: ${grantLeft(g)}` : 'no standing approval');
+    out((g ? `active: ${grantLeft(g)}` : 'no standing approval') + '\n');
   } else {
     const mins = Math.min(Math.max(Number(gflag('minutes', 30)), 1), 720);   // 12h ceiling
     const acts = gflag('actions', null);
     const scope = [`grant a standing approval for ${mins} minutes` +
                    (acts ? `, ${acts} actions` : ', unlimited actions')];
     if (!preApproved(argv) && !approve(scope, 'every page this browser visits')) {
-      console.error('ERR: not approved');
+      say('ERR: not approved\n');
       process.exitCode = 3;
     } else {
       issueGrant(mins, acts === null ? null : Number(acts));
-      console.log(`standing approval active for ${mins} min` +
-                  (acts ? `, ${acts} actions` : ', unlimited actions'));
-      console.log('revoke early with: gaze revoke');
+      out(`standing approval active for ${mins} min` +
+          (acts ? `, ${acts} actions` : ', unlimited actions') + '\n' +
+          'revoke early with: gaze revoke\n');
     }
   }
   process.exit(process.exitCode || 0);
@@ -1182,7 +1189,7 @@ try {
     // ONE confirmation for the whole script, not one per step.
     const writes = parsed.filter(p => isWrite(p.parts));
     if (writes.length && !preApprovedRun && !approve(writes.map(w => w.line), where())) {
-      console.error('ERR: not approved');
+      say('ERR: not approved\n');
       process.exitCode = 3;
     } else {
       for (const { line, parts } of parsed) {
@@ -1193,7 +1200,7 @@ try {
   } else {
     if (isWrite(argv) && !preApprovedRun &&
         !approve([argv.join(' ')], where())) {
-      console.error('ERR: not approved');
+      say('ERR: not approved\n');
       process.exitCode = 3;
     } else {
       await timed(argv);

@@ -23,6 +23,17 @@ if (!BIN) {
 }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+// Same guard as the Chromium suite: a leftover browser on this port would be
+// driven instead of the one we start, and the failures would look like product
+// bugs rather than a dirty environment.
+const ffPortOwner = execFileSync('bash', ['-c',
+  `ss -ltnp 2>/dev/null | grep ":${PORT} " || true`], { encoding: 'utf8' }).trim();
+if (ffPortOwner) {
+  console.error(`port ${PORT} is already in use:\n  ${ffPortOwner}\n` +
+                `clear it with:  bash killauto.sh ${PORT}`);
+  process.exit(1);
+}
+
 const profile = mkdtempSync(join(tmpdir(), 'gaze-ff-'));
 // Its own state directory, so the suite never touches the operator's real
 // standing grant or telemetry.

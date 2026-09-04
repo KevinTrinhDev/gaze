@@ -145,6 +145,11 @@ BIN=$(echo    "$ROW" | cut -d'|' -f2)
 LIVE=$(live_of "$(echo "$ROW" | cut -d'|' -f3)")
 AUTH="${GAZE_PROFILE:-$(echo "$ROW" | cut -d'|' -f4)}"
 FAMILY=$(echo "$ROW" | cut -d'|' -f5)
+# The backend stages downloads next to the profile, because a snap-confined
+# browser can only write inside its own snap home. A single hard-coded path
+# works for exactly one packaging of one browser and silently fails for the
+# rest, so hand the backend the profile that is actually in use.
+export GAZE_PROFILE_DIR="$AUTH"
 
 # Chromium serves CDP on the debug port; Firefox serves WebDriver BiDi.
 if [ "$FAMILY" = firefox ]; then

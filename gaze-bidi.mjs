@@ -10,7 +10,7 @@ import { writeFileSync, chmodSync } from 'node:fs';
 // approval at all, and page text came back bare with no injection scan, while
 // the README and the MCP server both claimed the two backends behaved
 // identically. Importing the one implementation is what makes that true.
-import { isWrite, approve, preApproved } from './consent.mjs';
+import { isWrite, approve, preApproved, say } from './consent.mjs';
 import { emit } from './untrusted.mjs';
 
 const PORT = process.env.GAZE_PORT || '9225';
@@ -171,7 +171,7 @@ const preApprovedRun = preApproved(rest);
 if (isWrite([cmd, ...positional]) && !preApprovedRun) {
   const where = `the page this Firefox is on (:${PORT})`;
   if (!approve([`${cmd} ${positional.join(' ')}`.trim()], where)) {
-    console.error('ERR: not approved');
+    say('ERR: not approved\n');
     process.exit(3);
   }
 }

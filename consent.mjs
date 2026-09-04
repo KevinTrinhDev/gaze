@@ -10,6 +10,25 @@
 // identically. One implementation, imported twice, is what makes that true.
 import { readFileSync, writeFileSync, mkdirSync, chmodSync, existsSync, rmSync,
          openSync, readSync, writeSync, closeSync } from 'node:fs';
+
+// The gate's messages are the ones that must NEVER be lost. process.stderr.write
+// buffers when stderr is a pipe, and process.exit() does not wait for it to
+// drain, so a caller capturing our output could see an empty string and have no
+// idea a write was refused. writeSync goes to the file descriptor directly and
+// has completed by the time it returns.
+export function say(text) {
+  try { writeSync(2, text); }
+  catch { try { process.stderr.write(text); } catch {} }
+}
+
+// Same guarantee for stdout, used by the commands that print one line and exit
+// immediately. setBlocking() is a best-effort belt on top of this, but it
+// silently no-ops when the handle is not what we expect, so the messages that
+// matter do not rely on it.
+export function out(text) {
+  try { writeSync(1, text); }
+  catch { try { process.stdout.write(text); } catch {} }
+}
 import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -222,29 +241,27 @@ export function approve(actions, where) {
   if (APPROVAL === 'off') return true;
   const granted = claimGrant();
   if (granted) {
-    process.stderr.write(`  [standing approval: ${grantLeft(granted)}]\n`);
+    say(`  [standing approval: ${grantLeft(granted)}]\n`);
     return true;
   }
   const lines = actions.map(a => `    ${a}`).join('\n');
-  process.stderr.write(
-    `\ngaze wants to perform ${actions.length} action(s) that change something:\n` +
-    `${lines}\n  on: ${where}\n`);
+  say(`\ngaze wants to perform ${actions.length} action(s) that change something:\n` +
+      `${lines}\n  on: ${where}\n`);
 
   if (APPROVAL === 'fingerprint') {
-    process.stderr.write('  touch the fingerprint reader to approve...\n');
+    say('  touch the fingerprint reader to approve...\n');
     const r = spawnSync('fprintd-verify', [], { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' });
     const ok = r.status === 0 && /verify-match/.test((r.stdout || '') + (r.stderr || ''));
-    process.stderr.write(ok ? '  approved (fingerprint)\n' : '  DENIED (no fingerprint match)\n');
+    say(ok ? '  approved (fingerprint)\n' : '  DENIED (no fingerprint match)\n');
     return ok;
   }
   const answer = askTty('  approve? [y/N] ');
   if (answer === null) {
-    process.stderr.write(
-      '  DENIED: no terminal to ask on.\n' +
-      '  Pass --yes, or set GAZE_APPROVAL=off, to run unattended.\n');
+    say('  DENIED: no terminal to ask on.\n' +
+        '  Pass --yes, or set GAZE_APPROVAL=off, or GAZE_YES=1, to run unattended.\n');
     return false;
   }
   const ok = answer === 'y' || answer === 'yes';
-  process.stderr.write(ok ? '  approved\n' : '  denied\n');
+  say(ok ? '  approved\n' : '  denied\n');
   return ok;
 }

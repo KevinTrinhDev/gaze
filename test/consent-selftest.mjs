@@ -117,6 +117,20 @@ try {
   })();
   check('GAZE_YES=1 pre-approves programmatically', viaEnv !== 3, `exit ${viaEnv}`);
 
+  // The model must not be able to name the file gaze writes. On the CLI `--out`
+  // is the operator choosing a path; over MCP it would be a model that has been
+  // reading web pages, which is an arbitrary write plus a chmod of whatever it
+  // named.
+  check('mcp.mjs does not let a model choose the screenshot path',
+        !/browser_screenshot[\s\S]{0,400}?out:\s*z\./.test(mcpSrc));
+
+  // Refusals must survive a pipe. process.exit() does not drain a buffered
+  // stream, so these messages go out through writeSync.
+  const piped = run('gaze-bidi.mjs', 'click', '#x');
+  check('a refusal reaches a piped caller, not an empty string',
+        piped.out.includes('DENIED') && piped.out.includes('not approved'),
+        JSON.stringify(piped.out.slice(0, 60)));
+
   // ---- ticket accounting: a budget is never overspent ----------------------
   // The old read-modify-write granted 17, then 5, then 15 against a budget of
   // 5 under this exact harness. Tickets grant exactly the budget.

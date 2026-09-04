@@ -133,12 +133,17 @@ server.registerTool('browser_table', {
   inputSchema: { nth: z.number().optional().describe('which table, 0-based') },
 }, async ({ nth }) => ab(['table', '--json', ...flags({ nth }, 'nth')]));
 
+// `out` is deliberately NOT exposed here. On the CLI it is the operator naming
+// a file; over MCP it would be a MODEL naming one, and the model has been
+// reading web pages. That is an arbitrary write: PNG bytes over any file the
+// user can write, followed by a chmod 0600 of whatever path was named. The
+// tool returns the path it chose, which is all a caller actually needs.
 server.registerTool('browser_screenshot', {
-  description: 'Screenshot the page. Returns the saved file path. ' +
+  description: 'Screenshot the page. Returns the saved file path, chosen by gaze. ' +
     'Never screenshot a page showing credentials, tokens or one-time codes.',
-  inputSchema: { full_page: z.boolean().optional(), out: z.string().optional() },
-}, async ({ full_page, out }) =>
-  ab(['shot', ...(full_page ? ['--full'] : []), ...flags({ out }, 'out')]));
+  inputSchema: { full_page: z.boolean().optional() },
+}, async ({ full_page }) =>
+  ab(['shot', ...(full_page ? ['--full'] : [])]));
 
 server.registerTool('browser_challenge', {
   description: 'Check whether a CAPTCHA or bot challenge is blocking the page. ' +
