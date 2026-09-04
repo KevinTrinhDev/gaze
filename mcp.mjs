@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // gaze as an MCP server.
 //
-// Lets any MCP client (Claude Code, Codex, other local agents) drive the real,
+// Lets any local MCP client (Claude Code, Codex, or a regular script) drive the real,
 // logged-in browser as native tool calls instead of shelling out and parsing
 // text. Every tool here runs the SAME `bin/gaze` CLI, so the browser table,
 // both protocol backends, the untrusted-content envelope and the approval gate
@@ -9,14 +9,14 @@
 //
 // TRANSPORT IS STDIO ONLY, on purpose. The client spawns this process locally;
 // nothing listens on a port and nothing is reachable from the network. A remote
-// or cloud agent cannot reach this browser, and should not: it holds live
+// or cloud client cannot reach this browser, and should not: it holds live
 // logged-in sessions.
 //
 // APPROVAL: an MCP server has no terminal, so GAZE_APPROVAL=prompt can never
 // be satisfied and every write is refused. Use fingerprint mode, which needs no
 // terminal:
 //     GAZE_APPROVAL=fingerprint
-// The agent asks, you touch the reader, it proceeds. That is the intended setup.
+// The calling client asks, you touch the reader, it proceeds. That is the intended setup.
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { execFile } from 'node:child_process';
@@ -58,7 +58,7 @@ const flags = (o, ...names) => names.flatMap(n => {
 });
 
 // Instructions ride along with the tool list, so this reaches the model before
-// it calls anything. An agent that picks up a logged-in browser should tell the
+// it calls anything. A calling AI client that picks up a logged-in browser should tell the
 // person whose sessions those are.
 const INSTRUCTIONS = `gaze drives a browser that is ALREADY SIGNED IN as the user. \
 It is not a test browser. It is theirs.

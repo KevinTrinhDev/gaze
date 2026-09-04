@@ -33,6 +33,10 @@ import { emit, sniff } from './untrusted.mjs';
 const DIR = new URL('.', import.meta.url).pathname;
 const PORT = process.env.GAZE_PORT || '9225';
 const SESSIONS = `${STATE}/sessions`;
+// Separate CLI invocations reconnect to the same browser. Persist the selected
+// tab identity so `goto --new`, then `shot`/`text`/`map`, acts on the new page
+// rather than whichever existing tab happens to be last in CDP's page list.
+const ACTIVE_TAB = `${STATE}/active-tab`;
 
 // Sites whose DOM must never be automated. Mirrors agent-daemon/src/allowlist.ts:
 // we bridge to the vault's CLI, we never drive the vault's own web UI.
@@ -57,7 +61,21 @@ async function attach() {
   if (!ctx) { await b.close().catch(() => {}); throw new Error('no browser context; run: gaze start'); }
   return { b, ctx };
 }
-// Active page = last non-blank tab, else first.
+function setActive(ctx, page) {
+  const index = ctx.pages().indexOf(page);
+  if (index < 0) return;
+  try {
+    mkdirSync(STATE, { recursive: true });
+    // CDP can reorder `context.pages()` when a later CLI invocation attaches.
+    // URL is stable across that reconnect; index remains only a fallback for a
+    // just-opened blank tab, before it has a meaningful URL.
+    writeFileSync(ACTIVE_TAB, JSON.stringify({ url: page.url(), index }), { mode: 0o600 });
+  } catch {}
+}
+
+// Active page = the tab selected by the last page command. Fall back to the
+// last real tab when the browser changed independently and the stored index is
+// no longer valid.
 function pick(ctx, idx) {
   const pages = ctx.pages();
   if (!pages.length) throw new Error('no open tabs');
@@ -65,10 +83,22 @@ function pick(ctx, idx) {
     const n = Number(idx);
     if (!Number.isInteger(n) || n < 0 || n >= pages.length)
       throw new Error(`no tab at index ${idx}; ${pages.length} tab(s) open (see: gaze tabs)`);
+    setActive(ctx, pages[n]);
     return pages[n];
   }
+  try {
+    const saved = JSON.parse(readFileSync(ACTIVE_TAB, 'utf8'));
+    if (saved.url && saved.url !== 'about:blank') {
+      const byUrl = pages.find(p => p.url() === saved.url);
+      if (byUrl) return byUrl;
+    }
+    const n = Number(saved.index);
+    if (Number.isInteger(n) && n >= 0 && n < pages.length) return pages[n];
+  } catch {}
   const real = pages.filter(p => !/^about:blank$/.test(p.url()));
-  return real.length ? real[real.length - 1] : pages[0];
+  const page = real.length ? real[real.length - 1] : pages[0];
+  setActive(ctx, page);
+  return page;
 }
 // process.exit() tears the process down without waiting for stdout to DRAIN.
 // To a terminal that is harmless, because those writes are synchronous, but to
@@ -400,6 +430,7 @@ async function dispatch(ctx, argv) {
       if (existsSync(INDICATOR_FILE)) {
         try { await p.evaluate(injectBadge, readFileSync(INDICATOR_FILE, 'utf8')); } catch {}
       }
+      setActive(ctx, p);
       console.log('URL:', p.url());
       console.log('TITLE:', await p.title());
       break;

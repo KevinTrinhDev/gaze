@@ -82,14 +82,16 @@ This is the threat that actually matters here, and the reason page output is
 wrapped rather than returned bare.
 
 A web page can contain text addressed to the *AI* rather than to the human. An
-agent that scrapes it may treat that text as instructions and act with a browser
-holding real credentials. 2026 research puts attack success rates against agentic
-systems at 84%, production exploits above CVSS 9.0, and OpenAI has publicly said
+external AI caller that scrapes it may treat that text as instructions and act
+through a browser holding real credentials. Gaze is the deterministic tool in
+that chain; it has no model or autonomous decision-making. 2026 research puts
+attack success rates against agentic systems at 84%, production exploits above
+CVSS 9.0, and OpenAI has publicly said
 prompt injection in AI browsers "may never be fully patched". OWASP's Top 10 for
 Agentic Applications 2026 covers it as LLM01 plus LLM06.
 
-gaze is close to the worst case for this: a logged-in browser, driven by an AI,
-reading arbitrary untrusted pages, with a `login` command nearby.
+The risk case is a logged-in browser driven by an external AI caller, reading
+arbitrary untrusted pages, with a `login` command nearby.
 
 Mitigations here:
 

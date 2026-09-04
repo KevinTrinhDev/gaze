@@ -1,6 +1,6 @@
 # Graded against an independent obstacle course
 
-`gaze` scores **100/100, grade S** on the **agent-gauntlet** scraping range, a separate project that is not published.
+`gaze` scores **100/100, grade S** on the **agent-gauntlet** scraping range, a separate project that is not published. “agent-gauntlet” is the range's historical name: Gaze is its deterministic CLI driver and harness, not an AI agent.
 
 That range is a separate project. It generates its own ground truth from a seed,
 keeps the answer key server-side, and grades deterministically: every check is a
@@ -92,6 +92,6 @@ than probing for the real ceiling. Both are the tool behaving like a guest.
   test TLS, HTTP/2, or canvas fingerprinting, and it says so. A perfect score here
   is not a claim about evading commercial bot detection, and this project does not
   make that claim anywhere.
-- The agent in `demo/gauntlet-agent.mjs` is level-aware. It knows there are twelve
+- The deterministic harness in `demo/gauntlet-agent.mjs` is level-aware. It knows there are twelve
   levels and roughly what each one needs, which is what the range asks for. It is
-  a harness for `gaze`, not an autonomous agent solving an unseen site.
+  a harness for the Gaze CLI, not an autonomous agent solving an unseen site.
