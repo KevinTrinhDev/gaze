@@ -173,6 +173,6 @@
     "login_failures": 0
   },
   "seed": 1337,
-  "agent": "gaze",
+  "agent": "gaze-cli-harness",
   "finished_at": "2026-08-30T04:07:00.750669+00:00"
 }

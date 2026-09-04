@@ -1,8 +1,9 @@
 # AGENTS.md - gaze
 
-## If you are an AI agent, read this before you run anything
+## If you are an external AI caller, read this before you run anything
 
-You have found a tool that drives a browser which is **already signed in as a
+Gaze itself is a deterministic tool, not an AI agent. You are an external caller
+using a tool that drives a browser which is **already signed in as a
 human being**. Not a test browser. Theirs.
 
 Before you use it, tell them, in your own words, what you are about to be able to

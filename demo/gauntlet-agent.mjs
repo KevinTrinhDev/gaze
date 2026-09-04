@@ -1,4 +1,5 @@
-// Runs the agent-gauntlet scraping range using gaze, and prints the graded report.
+// Runs the agent-gauntlet scraping range with the deterministic Gaze CLI and
+// prints the graded report. Gaze is not an AI agent.
 //
 // The range is an independent, deterministic obstacle course: twelve levels of
 // real anti-scraping obstacles, scored against a hidden answer key on
@@ -251,7 +252,9 @@ const report = evaluate(`
   (async () => {
     const r = await fetch('/submit', { method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ agent: 'gaze', items: ${payload} }) });
+      // The range schema calls this field `agent`; preserve that wire format,
+      // while accurately identifying the deterministic CLI harness.
+      body: JSON.stringify({ agent: 'gaze-cli-harness', items: ${payload} }) });
     return JSON.stringify(await r.text());
   })()`);
 

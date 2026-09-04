@@ -82,6 +82,16 @@ try {
   const tabs = JSON.parse(ab('tabs', '--json'));
   check('tabs --json is machine readable', Array.isArray(tabs) && tabs.length > 0);
 
+  // A CLI invocation reconnects each time. Selecting a tab must therefore
+  // persist its identity, or a subsequent read silently acts on an older tab
+  // selected by CDP ordering. Use the fixture's existing tab here: Playwright's
+  // CDP server does not permit a second client to create a page mid-test.
+  const targetTab = tabs.find(t => String(t.url).includes('127.0.0.1'))?.index;
+  const activeUrl = `${url}?active-tab-proof`;
+  ab('goto', activeUrl, '--tab', String(targetTab), '--wait', '100');
+  check('selected tab remains active across CLI invocations',
+        JSON.parse(ab('eval', 'location.href')).includes('active-tab-proof'));
+
   // ---- scraping ----
   const scrapeEnv = JSON.parse(ab('scrape', 'nav a', '--json'));
   check('scraped output is marked untrusted', scrapeEnv._untrusted === true);

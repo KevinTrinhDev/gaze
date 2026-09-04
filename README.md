@@ -16,7 +16,13 @@ Most browser automation drives a fresh, anonymous browser.
 
 It keeps a clone of your everyday profile, so your sessions come with it. Reading
 a page is free. Anything that *changes* something asks you first. Works from a
-shell, or from an AI agent over MCP.
+shell or any local MCP client.
+
+> **Gaze is a deterministic browser tool, not an AI agent.** It is a CLI and a
+> local stdio MCP server. It executes only commands a person or an external
+> client sends it. It has no model, planning, goal selection, autonomy, durable
+> memory, or self-modification. Claude, Codex, and other AI clients may call
+> Gaze; any agentic behavior belongs to that caller, never to Gaze.
 
 <img src="docs/demo.gif" alt="gaze reading a page, catching a prompt-injection attempt, and refusing a write until approved" width="100%">
 
@@ -81,7 +87,8 @@ interrupting you.
 gaze grant --minutes 30
 ```
 
-Or tie approval to hardware, which is the right mode when an agent is driving:
+Or tie approval to hardware, which is the right mode when an unattended MCP
+client is driving:
 
 ```bash
 GAZE_APPROVAL=fingerprint
@@ -209,7 +216,7 @@ still fails, and tells you every route it tried.
 </details>
 
 <details>
-<summary><b>Driving it from an AI agent</b></summary>
+<summary><b>Using Gaze from an external MCP client</b></summary>
 
 <br>
 
@@ -223,9 +230,9 @@ still fails, and tells you every route it tried.
 CLI, so both backends, the consent gate and the untrusted-content handling apply
 identically.
 
-The server also instructs the agent, before its first call, to tell you in plain
-words what it has just been handed: a browser logged in as you, what it can reach,
-and how to stop it. See [AGENTS.md](AGENTS.md).
+When the caller is an AI, the server instructs that external caller before its
+first call to tell you in plain words what it has been handed: a browser logged
+in as you, what it can reach, and how to stop it. See [AGENTS.md](AGENTS.md).
 
 **Transport is stdio only, deliberately.** Nothing listens on a port, so no remote
 or cloud agent can reach a browser holding your live sessions.
@@ -237,8 +244,8 @@ or cloud agent can reach a browser holding your live sessions.
 
 <br>
 
-A web page can carry text addressed to *your AI* rather than to you. An agent that
-reads it may follow those instructions while holding your credentials. Measured
+A web page can carry text addressed to *your AI* rather than to you. An external
+AI caller may follow those instructions while holding your credentials. Measured
 success rates against agentic systems reach 84%.
 
 So `text`, `html`, `scrape`, `links` and `table` wrap output in an envelope naming
