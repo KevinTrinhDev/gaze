@@ -25,10 +25,17 @@ import { writeFileSync, readFileSync, appendFileSync, mkdirSync, chmodSync, exis
          openSync, readSync, writeSync, closeSync, fstatSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 
 const DIR = new URL('.', import.meta.url).pathname;
+// Where gaze keeps its own state: the log, saved sessions, the standing grant
+// and its tickets. Overridable so the self-tests get a scratch directory
+// instead of the operator's real one. Without this the suite wrote to the live
+// grant file, so running `npm test` REVOKED a standing approval and dropped
+// fixture traffic into `gaze stats`.
+const STATE = process.env.GAZE_STATE || `${homedir()}/.local/share/gaze`;
 const PORT = process.env.GAZE_PORT || '9225';
-const SESSIONS = `${homedir()}/.local/share/gaze/sessions`;
+const SESSIONS = `${STATE}/sessions`;
 
 // Sites whose DOM must never be automated. Mirrors agent-daemon/src/allowlist.ts:
 // we bridge to the vault's CLI, we never drive the vault's own web UI.
@@ -133,7 +140,17 @@ async function clickEscalating(loc, timeout) {
     const msg = String(e.message);
     // A miss, a detach or a navigation is not an actionability problem.
     if (!NOT_ACTIONABLE.test(msg)) throw e;
-    if (MAY_HAVE_FIRED.test(msg)) throw e;
+    if (MAY_HAVE_FIRED.test(msg)) {
+      // Rethrowing the ORIGINAL error is not enough: its call log contains
+      // "waiting for scheduled navigations", which withRetry treats as a
+      // transient failure and retries, replaying the very click we just
+      // refused to repeat. Raise a clean error and mark it non-retryable.
+      const stop = new Error(
+        'click may already have been dispatched before it timed out, so it was ' +
+        'not retried. Re-run it deliberately if the action did not land.');
+      stop.gazeNoRetry = true;
+      throw stop;
+    }
   }
   // Deliberately NOT click({ force: true }) here. force skips the actionability
   // checks but still dispatches a real mouse event at the element's box, so on
@@ -151,6 +168,9 @@ async function clickEscalating(loc, timeout) {
 async function withRetry(fn, label) {
   try { return await fn(); }
   catch (first) {
+    // An action that may already have landed must never be replayed, however
+    // transient its error looks.
+    if (first.gazeNoRetry) throw first;
     if (/detached|not attached|Execution context|navigation/i.test(first.message)) {
       await new Promise(r => setTimeout(r, 600));
       return fn();
@@ -312,7 +332,7 @@ function askTty(question) {
   } catch { return null; }            // no controlling terminal
 }
 
-const INDICATOR_FILE = `${homedir()}/.local/share/gaze/indicator`;
+const INDICATOR_FILE = `${STATE}/indicator`;
 
 // Injected into the page. Shadow DOM so the host page's CSS cannot restyle or
 // hide it, and pointer-events:none so it can never swallow a click.
@@ -335,7 +355,7 @@ function injectBadge(label) {
   (document.body || document.documentElement).appendChild(host);
 }
 
-const LOG_FILE = `${homedir()}/.local/share/gaze/log.jsonl`;
+const LOG_FILE = `${STATE}/log.jsonl`;
 const LOG_ON = (process.env.GAZE_LOG || 'on') !== 'off';
 
 // A local, append-only record of what ran, how long it took and what failed.
@@ -348,7 +368,7 @@ const REDACT = new Set(['fill', 'login', 'eval']);
 function logLine(cmd, argv, host, ms, ok, err) {
   if (!LOG_ON) return;
   try {
-    mkdirSync(`${homedir()}/.local/share/gaze`, { recursive: true });
+    mkdirSync(STATE, { recursive: true });
     // For `fill`/`login` arg0 is a selector or vault item name: harmless, and
     // it makes the log readable. For `eval` arg0 is the script itself, which is
     // exactly where a secret shows up, so it must NOT be spared.
@@ -365,7 +385,7 @@ function logLine(cmd, argv, host, ms, ok, err) {
 }
 const hostOf = u => { try { return new URL(u).host; } catch { return null; } };
 
-const GRANT_FILE = `${homedir()}/.local/share/gaze/grant.json`;
+const GRANT_FILE = `${STATE}/grant.json`;
 
 // A grant is "I already said yes, stop asking". Approve once, then every write
 // runs unprompted until it expires or runs out of actions.
@@ -377,87 +397,80 @@ function readGrant() {
   try {
     const g = JSON.parse(readFileSync(GRANT_FILE, 'utf8'));
     if (Date.now() > g.expires) return null;
-    if (g.actions !== null && g.actions <= 0) return null;
+    if (g.actions !== null) {
+      if (g.actions <= 0) return null;
+      // Spent budgets live in the ticket files, not in this JSON.
+      if (ticketsUsed(g.id, g.actions) >= g.actions) return null;
+    }
     return g;
   } catch { return null; }
 }
 function writeGrant(g) {
-  mkdirSync(`${homedir()}/.local/share/gaze`, { recursive: true });
+  mkdirSync(STATE, { recursive: true });
   // mode on create closes the window where the grant is briefly world-readable;
   // the chmod still covers the case where the file already existed.
   writeFileSync(GRANT_FILE, JSON.stringify(g, null, 2), { mode: 0o600 });
   chmodSync(GRANT_FILE, 0o600);
 }
-function spendGrant(g) {
-  if (g.actions === null) return;
-  g.actions -= 1;
-  if (g.actions <= 0) { try { rmSync(GRANT_FILE, { force: true }); } catch {} }
-  else writeGrant(g);
+// SPENDING A BUDGET WITHOUT A LOCK.
+//
+// The obvious design, read the grant then write back count-1, is a lost update:
+// two processes both read "5 left" and both write 4, so a budget of 5 funds an
+// unbounded number of writes. The first fix here was an O_EXCL lockfile, and an
+// independent review was right to reject it twice: POSIX has no "unlink only if
+// the inode still matches" operation, so release and stale-reclaim both keep a
+// check-then-unlink window where two processes can hold the lock at once.
+//
+// So do not hold a lock at all. Each action is a TICKET, and a ticket is an
+// O_EXCL file create, which the kernel already makes atomic: exactly one
+// process can create a given name. To spend action k you must create ticket k.
+// Losing the race on k just means trying k+1. When every ticket up to the
+// budget exists, the budget is gone. There is no shared counter to lose.
+//
+// The other half of the property: claiming NEVER rewrites grant.json. It only
+// creates ticket files. That is what makes `revoke` authoritative, because no
+// in-flight claim can write a deleted grant back into existence.
+const TICKETS = `${STATE}/tickets`;
+
+function ticketsUsed(id, budget) {
+  let used = 0;
+  for (let k = 0; k < budget; k++) if (existsSync(`${TICKETS}/${id}.${k}`)) used++;
+  return used;
 }
 
-// Reading the grant and spending it has to be ONE step. Two gaze processes
-// running at once would otherwise both read "5 actions left", both write 4, and
-// a budget of 5 would fund an unbounded number of writes. For the one file
-// whose whole purpose is bounding consent, a lost update is a gate failure, so
-// the claim is serialised with an O_EXCL lockfile.
-const LOCK_FILE = `${GRANT_FILE}.lock`;
-const napper = new Int32Array(new SharedArrayBuffer(4));
-const nap = ms => { Atomics.wait(napper, 0, 0, ms); };
-
-// Releasing the lock has to unlink OUR lock, never whatever now sits at that
-// path. Naive "create with wx, rmSync in finally" has a real hole: a process
-// stalled past the stale threshold still holds its open inode while another
-// reclaims the pathname, and the stalled process's unlink then destroys the
-// NEW holder's lock, letting a third process in. So compare inodes before
-// unlinking, both when reclaiming a stale lock and when releasing our own.
-// The critical section is a sub-millisecond read-modify-write, so the stale
-// threshold is deliberately generous: it exists only to recover from a process
-// killed mid-claim, never to muscle past a lock that is legitimately busy.
-const LOCK_STALE_MS = 30000;
-
-function withGrantLock(fn) {
-  mkdirSync(`${homedir()}/.local/share/gaze`, { recursive: true });
-  for (let i = 0; i < 150; i++) {
-    let fd, mine;
-    try {
-      fd = openSync(LOCK_FILE, 'wx', 0o600);
-      mine = fstatSync(fd).ino;
-    } catch {
-      // Reclaim only the exact inode we observed to be stale. If it changed
-      // between the two stats, someone else already dealt with it.
-      try {
-        const seen = statSync(LOCK_FILE);
-        if (Date.now() - seen.mtimeMs > LOCK_STALE_MS) {
-          const again = statSync(LOCK_FILE);
-          if (again.ino === seen.ino) rmSync(LOCK_FILE, { force: true });
-        }
-      } catch {}
-      nap(20);
-      continue;
-    }
-    try { return fn(); }
-    finally {
-      try { closeSync(fd); } catch {}
-      // Only unlink if the path still points at the inode we created.
-      try {
-        if (statSync(LOCK_FILE).ino === mine) rmSync(LOCK_FILE, { force: true });
-      } catch {}
-    }
-  }
-  // Failing closed: if the gate cannot be held exclusively, it has not approved.
-  throw new Error('could not acquire the approval lock; refusing to assume consent');
+function clearTickets(id) {
+  try { rmSync(TICKETS, { recursive: true, force: true }); } catch {}
 }
 
-// Returns the grant it actually claimed, or null when there is none to claim.
-const claimGrant = () => withGrantLock(() => {
+// Returns the grant it actually claimed, or null when there is nothing to claim.
+function claimGrant() {
   const g = readGrant();
   if (!g) return null;
-  spendGrant(g);
-  return g;
-});
+  if (g.actions === null) return g;            // unlimited: nothing to spend
+
+  mkdirSync(TICKETS, { recursive: true });
+  for (let k = 0; k < g.actions; k++) {
+    let fd;
+    try { fd = openSync(`${TICKETS}/${g.id}.${k}`, 'wx', 0o600); }
+    catch { continue; }                        // someone else holds ticket k
+    closeSync(fd);
+    // Report what is left AFTER taking this one, so the operator sees a
+    // number that counts down rather than one that repeats.
+    return { ...g, left: Math.max(0, g.actions - ticketsUsed(g.id, g.actions)) };
+  }
+  // Every ticket is taken: the budget is spent. Retire the grant so
+  // grant-status stops advertising an approval that can no longer be used.
+  try { rmSync(GRANT_FILE, { force: true }); } catch {}
+  clearTickets(g.id);
+  return null;
+}
+
+const remainingOf = g =>
+  g.actions === null ? null : Math.max(0, g.actions - ticketsUsed(g.id, g.actions));
 const grantLeft = g =>
   `${Math.max(0, Math.round((g.expires - Date.now()) / 60000))} min` +
-  (g.actions === null ? ', unlimited actions' : `, ${g.actions} actions`);
+  (g.actions === null ? ', unlimited actions'
+                      : `, ${g.left ?? remainingOf(g)} actions`);
 
 function approve(actions, where) {
   if (APPROVAL === 'off') return true;
@@ -1201,12 +1214,11 @@ if (argv[0] === 'stats' || argv[0] === 'log') {
 if (argv[0] === 'grant' || argv[0] === 'revoke' || argv[0] === 'grant-status') {
   const gflag = (n, d) => { const i = argv.indexOf(`--${n}`); return i === -1 ? d : argv[i + 1]; };
   if (argv[0] === 'revoke') {
-    // Under the same lock as claimGrant. Without it, a claim already in flight
-    // could read the grant, have revoke delete it, and then write the
-    // decremented copy straight back, resurrecting an approval the operator
-    // just withdrew. Revocation has to be the last word.
-    try { withGrantLock(() => { try { rmSync(GRANT_FILE, { force: true }); } catch {} }); }
-    catch { try { rmSync(GRANT_FILE, { force: true }); } catch {} }
+    // Revocation is the last word, and it needs no lock to be so: claiming
+    // only ever CREATES ticket files, it never rewrites this JSON, so no
+    // in-flight claim can write a deleted grant back into existence.
+    try { rmSync(GRANT_FILE, { force: true }); } catch {}
+    try { rmSync(TICKETS, { recursive: true, force: true }); } catch {}
     console.log('standing approval revoked');
   } else if (argv[0] === 'grant-status') {
     const g = readGrant();
@@ -1220,13 +1232,14 @@ if (argv[0] === 'grant' || argv[0] === 'revoke' || argv[0] === 'grant-status') {
       console.error('ERR: not approved');
       process.exitCode = 3;
     } else {
-      // Same lock as claim and revoke: issuing a new, tighter grant must not
-      // be clobbered by an in-flight claim writing back the older budget.
+      // A fresh id per grant, so tickets from a previous, wider approval can
+      // never be counted against this one, and clearing them is unambiguous.
+      try { rmSync(TICKETS, { recursive: true, force: true }); } catch {}
       const fresh = { expires: Date.now() + mins * 60000,
                       actions: acts === null ? null : Number(acts),
-                      issued: new Date().toISOString() };
-      try { withGrantLock(() => writeGrant(fresh)); }
-      catch { writeGrant(fresh); }
+                      issued: new Date().toISOString(),
+                      id: randomUUID().slice(0, 8) };
+      writeGrant(fresh);
       console.log(`standing approval active for ${mins} min` +
                   (acts ? `, ${acts} actions` : ', unlimited actions'));
       console.log('revoke early with: gaze revoke');

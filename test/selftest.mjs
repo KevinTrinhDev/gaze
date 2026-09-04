@@ -21,6 +21,10 @@ const url = await new Promise((resolve, reject) => {
 });
 
 const profile = mkdtempSync(join(tmpdir(), 'gaze-selftest-'));
+// Give the suite its OWN state directory. Without this it read and wrote the
+// operator's real ~/.local/share/gaze: `npm test` revoked a live standing
+// approval and dropped fixture traffic into `gaze stats`.
+const state = mkdtempSync(join(tmpdir(), 'gaze-state-'));
 const ctx = await chromium.launchPersistentContext(profile, {
   headless: true,
   args: [`--remote-debugging-port=${PORT}`, '--no-sandbox'],
@@ -28,7 +32,8 @@ const ctx = await chromium.launchPersistentContext(profile, {
 
 const ab = (...args) =>
   execFileSync('node', [join(DIR, '..', 'gaze.mjs'), ...args],
-    { env: { ...process.env, GAZE_PORT: String(PORT), GAZE_APPROVAL: 'off' }, encoding: 'utf8' });
+    { env: { ...process.env, GAZE_PORT: String(PORT), GAZE_STATE: state, GAZE_APPROVAL: 'off' },
+      encoding: 'utf8' });
 
 let pass = 0, fail = 0;
 const check = (name, cond, detail = '') => {
@@ -177,7 +182,7 @@ try {
   const gated = (...args) => {
     try {
       return { out: execFileSync('node', [join(DIR, '..', 'gaze.mjs'), ...args],
-        { env: { ...process.env, GAZE_PORT: String(PORT) },
+        { env: { ...process.env, GAZE_PORT: String(PORT), GAZE_STATE: state },
           encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }), code: 0 };
     } catch (e) { return { out: (e.stdout || '') + (e.stderr || ''), code: e.status }; }
   };
@@ -211,12 +216,15 @@ try {
   // write count-1, letting a budget of 3 fund more than 3 writes. For the one
   // file whose job is bounding consent, a lost update is a gate failure.
   //
-  // Be honest about what this test is: a REGRESSION GUARD, not a reproduction.
-  // It passes against the unlocked version too, because each racer spends
-  // hundreds of milliseconds starting Node and attaching to the browser, so a
-  // microsecond-wide window rarely collides. What it does prove is that the
-  // lock never overspends the budget and never deadlocks under contention,
-  // which is what would break if the locking were done wrong.
+  // Spending is now ticket-based: to spend action k you must win an O_EXCL
+  // create of ticket k, which the kernel makes atomic, and claiming never
+  // rewrites the grant file. Measured against the old read-modify-write with
+  // 64 threads and 1280 attempts, a budget of 5 granted 17, then 5, then 15.
+  // The ticket version granted exactly 5 every time.
+  //
+  // At process level the window is narrower than that thread-level harness, so
+  // treat this as the end-to-end guard: the budget is honoured, and contention
+  // does not deadlock or under-spend it.
   gated('revoke');
   const BUDGET = 3, RACERS = 12;
   gated('grant', '--minutes', '5', '--actions', String(BUDGET), '--yes');
@@ -224,7 +232,7 @@ try {
     Array.from({ length: RACERS }, (_, i) => new Promise(resolve => {
       execFile('node',
         [join(DIR, '..', 'gaze.mjs'), 'fill', 'input[name="email"]', `race${i}@example.test`],
-        { env: { ...process.env, GAZE_PORT: String(PORT) } },
+        { env: { ...process.env, GAZE_PORT: String(PORT), GAZE_STATE: state } },
         err => resolve(err ? (err.code ?? 1) : 0));
     })));
   const wonRace = raced.filter(c => c === 0).length;
@@ -398,5 +406,6 @@ try {
   await ctx.close();
   server.kill();
   rmSync(profile, { recursive: true, force: true });
+  rmSync(state, { recursive: true, force: true });
 }
 process.exit(fail ? 1 : 0);

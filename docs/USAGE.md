@@ -233,6 +233,7 @@ because a log that quietly accumulates passwords is worse than no log.
 | `GAZE_PORT` | run on a different debug port, default `9225` |
 | `GAZE_PROFILE` | keep the cloned profile somewhere else |
 | `GAZE_HOME` | point at a different checkout |
+| `GAZE_STATE` | keep the log, sessions and standing grant somewhere else (default `~/.local/share/gaze`) |
 | `GAZE_LOG` | `off` disables activity logging |
 | `GAZE_HEADLESS` | start without a visible window |
 
