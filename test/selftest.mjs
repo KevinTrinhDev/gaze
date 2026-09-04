@@ -46,7 +46,8 @@ const ctx = await chromium.launchPersistentContext(profile, {
 
 const ab = (...args) =>
   execFileSync('node', [join(DIR, '..', 'gaze.mjs'), ...args],
-    { env: { ...process.env, GAZE_PORT: String(PORT), GAZE_STATE: state, GAZE_APPROVAL: 'off' },
+    { env: { ...process.env, GAZE_PORT: String(PORT), GAZE_STATE: state,
+             GAZE_APPROVAL: 'off', GAZE_DRIVER: 'playwright' },
       encoding: 'utf8' });
 
 let pass = 0, fail = 0;
@@ -228,7 +229,8 @@ try {
   const gated = (...args) => {
     try {
       return { out: execFileSync('node', [join(DIR, '..', 'gaze.mjs'), ...args],
-        { env: { ...process.env, GAZE_PORT: String(PORT), GAZE_STATE: state },
+        { env: { ...process.env, GAZE_PORT: String(PORT), GAZE_STATE: state,
+                 GAZE_DRIVER: 'playwright' },
           encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }), code: 0 };
     } catch (e) { return { out: (e.stdout || '') + (e.stderr || ''), code: e.status }; }
   };
@@ -285,7 +287,8 @@ try {
     Array.from({ length: RACERS }, (_, i) => new Promise(resolve => {
       execFile('node',
         [join(DIR, '..', 'gaze.mjs'), 'fill', 'input[name="email"]', `race${i}@example.test`],
-        { env: { ...process.env, GAZE_PORT: String(PORT), GAZE_STATE: state } },
+        { env: { ...process.env, GAZE_PORT: String(PORT), GAZE_STATE: state,
+                 GAZE_DRIVER: 'playwright' } },
         err => resolve(err ? (err.code ?? 1) : 0));
     })));
   const wonRace = raced.filter(c => c === 0).length;

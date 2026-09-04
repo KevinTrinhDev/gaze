@@ -17,8 +17,19 @@
 let chromium;
 async function driver() {
   if (chromium) return chromium;
-  try   { ({ chromium } = await import('patchright')); }
-  catch { ({ chromium } = await import('playwright')); }
+  // The self-test launches its disposable browser with Playwright, so it pins
+  // the client to the same protocol implementation. Mixing two independently
+  // versioned CDP clients against that one throwaway process is needlessly
+  // flaky; it says nothing about the normal runtime, which still prefers
+  // Patchright. This also gives maintainers an explicit diagnostic switch.
+  if (process.env.GAZE_DRIVER === 'playwright') {
+    ({ chromium } = await import('playwright'));
+  } else if (process.env.GAZE_DRIVER === 'patchright') {
+    ({ chromium } = await import('patchright'));
+  } else {
+    try { ({ chromium } = await import('patchright')); }
+    catch { ({ chromium } = await import('playwright')); }
+  }
   return chromium;
 }
 import { writeFileSync, readFileSync, appendFileSync, mkdirSync, chmodSync, existsSync, rmSync, statSync,
