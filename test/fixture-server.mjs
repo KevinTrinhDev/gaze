@@ -33,6 +33,30 @@ const PAGE = `<!doctype html><title>fixture</title>
   });
 </script>`;
 const FRAME = `<!doctype html><button id="frame-btn" style="width:80px;height:20px">Frame action</button>`;
+// A page taller than any viewport, with a target far below the fold, so the
+// scroll command has somewhere to actually go.
+const TALL = `<!doctype html><title>tall</title>
+<div style="height:4000px">top</div>
+<button id="deep" style="width:120px;height:30px">Deep control</button>
+<div style="height:4000px">bottom</div>`;
+// The shape that actually shows up in real logs on Google's admin consoles: a
+// synthetic control that is visible, so locate() finds it, but sits under a
+// transparent overlay, so a normal click fails the pointer-events check and
+// burns the whole timeout. The escalation path must still reach THIS element
+// and not the overlay, which is why the fallback is a DOM click rather than a
+// forced mouse click.
+const OBSTRUCTED = `<!doctype html><title>obstructed</title>
+<div id="target" role="button" tabindex="-1"
+     style="position:absolute;top:40px;left:40px;width:160px;height:40px">Save alias</div>
+<div id="veil"
+     style="position:absolute;top:0;left:0;width:400px;height:200px;background:rgba(0,0,0,0)"></div>
+<p id="result">nothing clicked</p>
+<script>
+  document.getElementById('target').addEventListener('click',
+    () => { document.getElementById('result').textContent = 'target clicked'; });
+  document.getElementById('veil').addEventListener('click',
+    () => { document.getElementById('result').textContent = 'VEIL CLICKED'; });
+</script>`;
 // A page that looks challenged, for the detector. Nothing here solves anything.
 const INJECTED = `<!doctype html><title>notes</title>
 <main><p>Quarterly notes follow.</p>
@@ -76,6 +100,8 @@ createServer((req, res) => {
   if (req.url === '/presshold') return res.end(PRESSHOLD);
   if (req.url === '/blocked') return res.end(BLOCKED);
   if (req.url === '/injected') return res.end(INJECTED);
+  if (req.url === '/obstructed') return res.end(OBSTRUCTED);
+  if (req.url === '/tall') return res.end(TALL);
   res.end(PAGE);
 }).listen(0, '127.0.0.1', function () {
   process.stdout.write(`PORT ${this.address().port}\n`);

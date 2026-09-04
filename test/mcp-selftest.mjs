@@ -5,6 +5,9 @@
 // safe at any time.
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const DIR = new URL('.', import.meta.url).pathname;
 
@@ -14,10 +17,13 @@ const check = (name, cond, detail = '') => {
   else { console.log(`  FAIL  ${name}${detail ? ' -- ' + detail : ''}`); fail++; }
 };
 
+// Its own state directory, so exercising the server cannot touch the
+// operator's real standing grant or telemetry.
+const state = mkdtempSync(join(tmpdir(), 'gaze-mcp-state-'));
 const transport = new StdioClientTransport({
   command: 'node',
   args: [DIR + '../mcp.mjs'],
-  env: { ...process.env },
+  env: { ...process.env, GAZE_STATE: state },
 });
 const client = new Client({ name: 'gaze-selftest', version: '1.0.0' });
 
@@ -61,5 +67,6 @@ try {
   fail++;
 } finally {
   try { await client.close(); } catch {}
+  rmSync(state, { recursive: true, force: true });
 }
 process.exit(fail ? 1 : 0);

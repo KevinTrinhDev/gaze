@@ -107,12 +107,40 @@ None of this is a proof. Treat scraped content as hostile input, always.
 Every capability stays enabled. The gate governs *consent*, not power.
 
 - Read commands never prompt.
-- Write commands (`click`, `fill`, `press`, `download`, `eval`, `login`) prompt,
-  showing the actions and the page they will run on.
+- Write commands (`click`, `fill`, `press`, `download`, `eval`, `login`,
+  `upload`, `record`, and `session load`) prompt, showing the actions and the
+  page they will run on. `session list` stays ungated because it reveals only
+  the names of saved sessions, never their contents.
 - `batch` prompts once for a whole script.
 - `GAZE_APPROVAL=fingerprint` requires a biometric touch via `fprintd-verify`.
+- Consent is never inferred from data. `--yes` counts only as a real flag, never
+  as a positional after `--` and never as the value of another flag, and
+  `GAZE_YES=1` exists so a programmatic caller can approve without putting
+  consent anywhere page-derived text can reach. The MCP server passes every
+  model-supplied string after `--` for the same reason.
 - With no terminal and no explicit `off` or `--yes`, writes are **refused**. Failing
   closed is the point: an unattended agent must be configured deliberately.
+
+### Known bounds
+
+Two limits are real, deliberate, and stated here rather than left for you to
+discover:
+
+**A revoke can lose a photo finish.** `gaze revoke` is final against anything
+that has not yet been approved, and an in-flight claim cannot resurrect a
+revoked grant. But a claim that has already passed its final check, in the
+milliseconds before its browser write lands, will complete. Closing that would
+mean holding a lock from the consent check through a round-trip to the browser.
+Node has no `flock`, so that means a hand-rolled cross-process lock protocol,
+and the ticket design here exists precisely because two earlier attempts at such
+a protocol were wrong in ways that permitted concurrent holders. A documented
+millisecond bound is the better trade. `gaze stop` is the hard stop.
+
+**A secret in a URL path still reaches the log.** `goto` entries keep origin and
+path while stripping the query, fragment and userinfo, because that is where
+magic-link tokens and OAuth codes live. A token embedded in the path itself,
+such as `/reset/TOKEN`, survives: stripping the path would leave log entries
+that say nothing at all. Use `GAZE_LOG=off` for a run where that matters.
 
 ## Data handling
 
