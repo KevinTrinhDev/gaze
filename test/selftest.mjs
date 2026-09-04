@@ -2,7 +2,7 @@
 // Runs against a THROWAWAY headless chromium on its own port and profile.
 // It never touches the real Brave clone, so it is safe to run at any time.
 import { chromium } from 'playwright';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, execFile, spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -20,7 +20,25 @@ const url = await new Promise((resolve, reject) => {
   });
 });
 
+// Refuse to start if something already owns our port. A browser left behind by
+// a crashed run will happily accept our CDP connection, and then the suite is
+// silently driving the WRONG browser: tests fail in ways that look like product
+// regressions ("no table at index 0") and change from run to run. Fail fast and
+// say how to clear it.
+const portOwner = execFileSync('bash', ['-c',
+  `ss -ltnp 2>/dev/null | grep ":${PORT} " || true`], { encoding: 'utf8' }).trim();
+if (portOwner) {
+  console.error(`port ${PORT} is already in use, so this suite would drive a ` +
+                `browser it did not start:\n  ${portOwner}\n` +
+                `clear it with:  bash killauto.sh ${PORT}`);
+  process.exit(1);
+}
+
 const profile = mkdtempSync(join(tmpdir(), 'gaze-selftest-'));
+// Give the suite its OWN state directory. Without this it read and wrote the
+// operator's real ~/.local/share/gaze: `npm test` revoked a live standing
+// approval and dropped fixture traffic into `gaze stats`.
+const state = mkdtempSync(join(tmpdir(), 'gaze-state-'));
 const ctx = await chromium.launchPersistentContext(profile, {
   headless: true,
   args: [`--remote-debugging-port=${PORT}`, '--no-sandbox'],
@@ -28,7 +46,8 @@ const ctx = await chromium.launchPersistentContext(profile, {
 
 const ab = (...args) =>
   execFileSync('node', [join(DIR, '..', 'gaze.mjs'), ...args],
-    { env: { ...process.env, GAZE_PORT: String(PORT), GAZE_APPROVAL: 'off' }, encoding: 'utf8' });
+    { env: { ...process.env, GAZE_PORT: String(PORT), GAZE_STATE: state, GAZE_APPROVAL: 'off' },
+      encoding: 'utf8' });
 
 let pass = 0, fail = 0;
 const check = (name, cond, detail = '') => {
@@ -128,14 +147,64 @@ try {
   check('an unmatchable selector still fails, and says what it tried',
         noMatch.includes('no element matched') && noMatch.includes('tried'), noMatch.trim().slice(0, 70));
 
+  // ---- scroll ---------------------------------------------------------
+  // There was no scroll command at all, which for a scraping tool means no way
+  // to reach lazily-loaded content below the fold.
+  ab('goto', url + 'tall', '--wait', '400');
+  const atTop = ab('scroll', 'top');
+  check('scroll top reports its position', /at 0px of \d+px/.test(atTop), atTop.trim());
+  const down = ab('scroll', 'down', '--px', '500');
+  check('scroll down moves the page', /at (?!0px)\d+px/.test(down), down.trim());
+  const bottom = ab('scroll', 'bottom');
+  const mB = /at (\d+)px of (\d+)px/.exec(bottom);
+  check('scroll bottom reaches the end', mB && mB[1] === mB[2], bottom.trim());
+  const up = ab('scroll', 'up', '--px', '100000');
+  check('scroll up clamps at the top', /at 0px/.test(up), up.trim());
+  const toEl = ab('scroll', 'to', '#deep');
+  check('scroll to an element brings it into view',
+        toEl.includes('scrolled to #deep'), toEl.trim());
+  let badScroll = '';
+  try { ab('scroll', 'sideways'); } catch (e) { badScroll = (e.stdout||'') + (e.stderr||''); }
+  check('an unknown scroll direction is explained, not ignored',
+        badScroll.includes('expected up, down, top, bottom'), badScroll.trim().slice(0, 60));
+  ab('goto', url, '--wait', '400');
+
+  // ---- obstructed click: the pattern that dominates real click failures ----
+  // A visible synthetic control under a transparent overlay. locate() finds it,
+  // a normal click fails the pointer-events check, and the escalation has to
+  // reach the TARGET rather than the veil sitting on top of it.
+  ab('goto', url + 'obstructed', '--wait', '400');
+  const obstructed = ab('click', '#target', '--timeout', '3000');
+  check('an obstructed click escalates instead of just timing out',
+        obstructed.includes('dispatched a DOM click'), obstructed.trim().slice(0, 80));
+  const landed = ab('scrape', '#result', '--raw').trim();
+  check('the escalated click reaches the target, not the overlay',
+        landed.includes('target clicked'), landed.slice(0, 60));
+  ab('goto', url, '--wait', '400');
+
   // ---- recording ----
+  // mp4 is documented as optional: frames are the source of truth and a
+  // missing ffmpeg still exits 0. Asserting mp4 unconditionally made the
+  // suite fail on any machine without ffmpeg, CI included, for a case the
+  // design says is fine. Check it only when ffmpeg is actually there.
+  let hasFfmpeg = true;
+  try { execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); }
+  catch { hasFfmpeg = false; }
+
   const rec = ab('record', '--seconds', '2', '--fps', '4');
   const recPath = rec.trim().split('\n').pop();
-  check('record produces an mp4', recPath.endsWith('.mp4'), recPath);
-  check('the recording file exists and is non-empty',
-        existsSync(recPath) && statSync(recPath).size > 1000,
-        existsSync(recPath) ? String(statSync(recPath).size) + ' bytes' : 'missing');
-  rmSync(recPath, { force: true });
+  if (hasFfmpeg) {
+    check('record produces an mp4', recPath.endsWith('.mp4'), recPath);
+    check('the recording file exists and is non-empty',
+          existsSync(recPath) && statSync(recPath).size > 1000,
+          existsSync(recPath) ? String(statSync(recPath).size) + ' bytes' : 'missing');
+  } else {
+    check('record falls back to frames when ffmpeg is absent',
+          rec.includes('frames ('), rec.trim().slice(0, 70));
+  }
+  // With ffmpeg the last line is the mp4 path; without it, it is
+  // "N frames (X MB) in <dir>", so take the part after " in ".
+  rmSync(recPath.split(' in ').pop().trim(), { recursive: true, force: true });
   const framesOut = ab('record', '--seconds', '1', '--fps', '3', '--format', 'frames');
   check('frames-only mode never needs ffmpeg', framesOut.includes('frames ('), framesOut.trim());
   rmSync(framesOut.trim().split(' in ').pop().trim(), { recursive: true, force: true });
@@ -149,13 +218,20 @@ try {
   const gated = (...args) => {
     try {
       return { out: execFileSync('node', [join(DIR, '..', 'gaze.mjs'), ...args],
-        { env: { ...process.env, GAZE_PORT: String(PORT) },
+        { env: { ...process.env, GAZE_PORT: String(PORT), GAZE_STATE: state },
           encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }), code: 0 };
     } catch (e) { return { out: (e.stdout || '') + (e.stderr || ''), code: e.status }; }
   };
   const denied = gated('fill', 'input[name="email"]', 'blocked@example.test');
   check('write action with no terminal is refused', denied.code === 3, 'exit ' + denied.code);
   check('refusal explains how to run unattended', denied.out.includes('GAZE_APPROVAL=off'));
+  // A SELECTOR literally called "--yes" must not approve its own write. This is
+  // the injection path: a caller that builds selectors from page content could
+  // otherwise be steered into consenting on the page's behalf.
+  const spoof = gated('fill', '--', '--yes', 'spoofed@example.test');
+  check('a selector named --yes cannot approve its own write', spoof.code === 3,
+        `exit ${spoof.code}`);
+
   const allowed = gated('fill', 'input[name="email"]', 'allowed@example.test', '--yes');
   check('--yes pre-approves the action', allowed.code === 0, 'exit ' + allowed.code);
   const readOk = gated('text', '--max', '50');
@@ -177,6 +253,45 @@ try {
   check('second write also runs unprompted', g2.code === 0, 'exit ' + g2.code);
   const g3 = gated('fill', 'input[name="email"]', 'granted3@example.test');
   check('grant is spent after its action budget', g3.code === 3, 'exit ' + g3.code);
+  // ---- stress: a grant budget must survive concurrent processes ------------
+  // readGrant() then spendGrant() used to be an unlocked read-modify-write, so
+  // two processes racing could each read the same remaining count and each
+  // write count-1, letting a budget of 3 fund more than 3 writes. For the one
+  // file whose job is bounding consent, a lost update is a gate failure.
+  //
+  // Spending is now ticket-based: to spend action k you must win an O_EXCL
+  // create of ticket k, which the kernel makes atomic, and claiming never
+  // rewrites the grant file. Measured against the old read-modify-write with
+  // 64 threads and 1280 attempts, a budget of 5 granted 17, then 5, then 15.
+  // The ticket version granted exactly 5 every time.
+  //
+  // At process level the window is narrower than that thread-level harness, so
+  // treat this as the end-to-end guard: the budget is honoured, and contention
+  // does not deadlock or under-spend it.
+  gated('revoke');
+  const BUDGET = 3, RACERS = 12;
+  gated('grant', '--minutes', '5', '--actions', String(BUDGET), '--yes');
+  const raced = await Promise.all(
+    Array.from({ length: RACERS }, (_, i) => new Promise(resolve => {
+      execFile('node',
+        [join(DIR, '..', 'gaze.mjs'), 'fill', 'input[name="email"]', `race${i}@example.test`],
+        { env: { ...process.env, GAZE_PORT: String(PORT), GAZE_STATE: state } },
+        err => resolve(err ? (err.code ?? 1) : 0));
+    })));
+  const wonRace = raced.filter(c => c === 0).length;
+  check(`a grant budget of ${BUDGET} is not overspent by ${RACERS} concurrent writes`,
+        wonRace <= BUDGET, `${wonRace} writes were allowed`);
+  check('the budget is actually usable under contention, not deadlocked',
+        wonRace === BUDGET, `${wonRace} of ${BUDGET} used`);
+  gated('revoke');
+
+  // An unlimited grant is re-checked after it is read, so a revoke that lands
+  // first wins rather than being outrun by a claim already in flight.
+  gated('grant', '--minutes', '5', '--yes');
+  gated('revoke');
+  check('a write after revoke is refused, even with an unlimited grant issued',
+        gated('fill', 'input[name="email"]', 'after@example.test').code === 3);
+
   gated('grant', '--minutes', '5', '--yes');
   check('revoke clears a standing approval',
         gated('revoke').out.includes('revoked') && gated('grant-status').out.includes('no standing'));
@@ -226,6 +341,15 @@ try {
   check('secrets are redacted in the log',
         !rawLog.includes('granted1@example.test') || rawLog.includes('<redacted>'));
   const fillEntries = ab('log', '--n', '200').split('\n').filter(l => l.includes('"fill"'));
+  // A magic-link or OAuth URL carries its secret in the query string, and this
+  // log persists on disk.
+  ab('goto', url + '?token=SUPERSECRETVALUE&next=/x', '--wait', '300');
+  const gotoLog = ab('log', '--n', '40');
+  check('goto query strings are stripped from the log',
+        !gotoLog.includes('SUPERSECRETVALUE') && gotoLog.includes('<redacted>'),
+        gotoLog.split('\n').filter(l => l.includes('goto')).slice(-1)[0] || '');
+  ab('goto', url, '--wait', '300');
+
   check('fill values never reach the log',
         fillEntries.length > 0 && fillEntries.every(l => !l.includes('@example.test')),
         `${fillEntries.length} fill entries`);
@@ -341,5 +465,6 @@ try {
   await ctx.close();
   server.kill();
   rmSync(profile, { recursive: true, force: true });
+  rmSync(state, { recursive: true, force: true });
 }
 process.exit(fail ? 1 : 0);

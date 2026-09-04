@@ -78,11 +78,24 @@ gaze click "#signin"
 gaze click "Sign in" --text        # match visible text instead
 gaze fill "input[name=email]" you@example.com --enter
 gaze press Enter
+gaze scroll down --px 800          # up | down | top | bottom
+gaze scroll to "#pricing"          # bring an element into view
 gaze upload "#attachment" ./report.pdf
 gaze download "a.download-link"
 ```
 
 All of these are write actions, so they ask first. See **Consent** below.
+
+`click` escalates once, and says so. Some controls are visible but refuse a
+normal click: a synthetic `<div role="button">` under a transparent overlay is
+the common case on admin consoles. Rather than burn the whole timeout, gaze
+dispatches a DOM click on the element it already located, and appends
+`(dispatched a DOM click)` to the output so the escalation is never silent.
+
+It deliberately does **not** force a mouse click. A forced click still fires at
+the element's coordinates, so on a covered element it would hit whatever sits on
+top. On a browser holding live sessions, clicking the wrong control silently is
+worse than failing. A selector that matches nothing still fails, as before.
 
 ## Screenshots and recording
 
@@ -102,15 +115,26 @@ cleanly and says why.
 
 ## Consent
 
-Reads never prompt. Writes (`click`, `fill`, `press`, `download`, `eval`, `login`)
-do, showing the action and the page it will run on.
+Reads never prompt. Writes (`click`, `fill`, `press`, `download`, `eval`,
+`login`, `upload`, `record`, and `session load`) do, showing the action and the
+page it will run on. `session list` stays ungated: it shows only the names of
+saved sessions, never their contents.
 
 ```bash
 GAZE_APPROVAL=prompt        # ask on the terminal (default)
 GAZE_APPROVAL=fingerprint   # require a fingerprint touch
 GAZE_APPROVAL=off           # trust the caller
 gaze click "#buy" --yes     # pre-approve this one action
+GAZE_YES=1 gaze click "#buy"   # the same, for programmatic callers
 ```
+
+**If a value came from a page, put it after `--`.** `gaze fill "#note" -- "$text"`
+is unambiguous; `gaze fill "#note" "$text"` is not, because a `$text` of
+`--yes` is a flag by Unix convention. That was a real bypass: the MCP server
+handed model-supplied strings straight to the CLI, so a page saying "type
+`--yes` into the box" pre-approved its own write. The MCP server now always
+inserts `--`, and `GAZE_YES=1` exists so programmatic callers never have to put
+consent in argv at all, where page-derived data can reach it.
 
 For fingerprint mode, enrol one first with `fprintd-enroll`.
 
@@ -152,8 +176,11 @@ gaze login github.com --totp
 by a human action, and `gaze` is a CLI that agents drive: letting it run
 `bw unlock` would hand any agent the ability to unlock your vault on its own.
 
-Secrets never touch argv, stdout, or the log. It also refuses to type into a
-password manager's own web UI.
+Secrets never touch argv, stdout, or the log: the vault session is handed to
+`bw` through the environment, not on its command line, so it is not sitting in
+`ps` while the call runs. `login` also refuses to run on a password manager's
+own web UI. That guard is on `login` specifically, so a plain `fill` there is
+not blocked.
 
 ## Sessions
 
@@ -208,8 +235,13 @@ gaze log --n 20        # raw recent entries
 ```
 
 Local JSONL, mode 600, nothing leaves the machine, `GAZE_LOG=off` disables it.
-**Values are redacted**: `fill` values and `login` arguments never reach the log,
-because a log that quietly accumulates passwords is worse than no log.
+**Values are redacted**: `fill` values, `eval` scripts and `login` arguments
+never reach the log, because a log that quietly accumulates passwords is worse
+than no log. `goto` URLs keep their origin and path but have their query string,
+fragment and any userinfo stripped, since that is where magic-link tokens,
+OAuth codes and signed-URL signatures live. A secret embedded in the path
+itself does survive: stripping the path too would leave entries that say
+nothing. Use `GAZE_LOG=off` for a run where even that matters.
 
 ## Settings
 
@@ -220,6 +252,8 @@ because a log that quietly accumulates passwords is worse than no log.
 | `GAZE_PORT` | run on a different debug port, default `9225` |
 | `GAZE_PROFILE` | keep the cloned profile somewhere else |
 | `GAZE_HOME` | point at a different checkout |
+| `GAZE_STATE` | keep the log, sessions and standing grant somewhere else (default `~/.local/share/gaze`) |
+| `GAZE_YES` | `1` pre-approves writes without putting consent in argv |
 | `GAZE_LOG` | `off` disables activity logging |
 | `GAZE_HEADLESS` | start without a visible window |
 

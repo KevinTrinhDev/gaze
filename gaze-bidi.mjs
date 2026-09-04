@@ -4,10 +4,26 @@
 // Firefox removed CDP in 141, so the Chromium path (gaze.mjs, Playwright over CDP)
 // cannot drive it. --remote-debugging-port on Firefox now serves BiDi, which this
 // speaks directly: Node 22 ships a global WebSocket, so no extra dependency.
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, chmodSync } from 'node:fs';
+// The SAME gate and the SAME untrusted envelope as the Chromium backend. Before
+// this, neither existed here: `GAZE_BROWSER=firefox gaze click ...` ran with no
+// approval at all, and page text came back bare with no injection scan, while
+// the README and the MCP server both claimed the two backends behaved
+// identically. Importing the one implementation is what makes that true.
+import { isWrite, approve, preApproved, say } from './consent.mjs';
+import { emit } from './untrusted.mjs';
 
 const PORT = process.env.GAZE_PORT || '9225';
 const DIR = new URL('.', import.meta.url).pathname;
+// process.exit() tears the process down without waiting for stdout to DRAIN.
+// To a terminal that is harmless, because those writes are synchronous, but to
+// a PIPE they are not: the last write can be discarded, and a caller reading
+// our output sees an empty string and concludes the command printed nothing.
+// Making the stream blocking costs nothing here (we print once and leave) and
+// removes the failure mode everywhere, without restructuring every early exit.
+try { process.stdout._handle?.setBlocking?.(true); } catch {}
+try { process.stderr._handle?.setBlocking?.(true); } catch {}
+
 const stamp = () => new Date().toISOString().replace(/[:.]/g, '-');
 
 class Bidi {
@@ -88,12 +104,18 @@ function deserialize(v) {
   }
 }
 
-const [cmd, ...rest] = process.argv.slice(2);
+const [cmd, ...rawArgs] = process.argv.slice(2);
+// Everything after `--` is data, never a flag: see preApproved() in consent.mjs
+// for why that distinction is a security property and not a nicety.
+const dashDash = rawArgs.indexOf('--');
+const rest = dashDash === -1 ? rawArgs : rawArgs.slice(0, dashDash);
+const tail = dashDash === -1 ? [] : rawArgs.slice(dashDash + 1);
 const flag = (n, d) => { const i = rest.indexOf(`--${n}`); return i === -1 ? d : rest[i + 1]; };
 const has = n => rest.includes(`--${n}`);
 const positional = rest.filter((a, i) =>
   !a.startsWith('--') && !(i > 0 && rest[i - 1].startsWith('--') &&
-    !['headed', 'full', 'enter', 'new', 'nav', 'json', 'text'].includes(rest[i - 1].slice(2))));
+    !['headed', 'full', 'enter', 'new', 'nav', 'json', 'text', 'raw', 'yes'].includes(rest[i - 1].slice(2))))
+  .concat(tail);
 
 // Shared with the Chromium backend in spirit: hide page chrome by default, walk
 // shadow roots, emit a reusable selector. Kept as a string so it can be shipped
@@ -143,6 +165,17 @@ const CHALLENGE_JS = `(() => {
                           phrase: phrase || null });
 })()`;
 
+// The gate runs BEFORE the browser is touched, exactly as it does on the
+// Chromium side. A refusal exits 3 so callers can branch on it.
+const preApprovedRun = preApproved(rest);
+if (isWrite([cmd, ...positional]) && !preApprovedRun) {
+  const where = `the page this Firefox is on (:${PORT})`;
+  if (!approve([`${cmd} ${positional.join(' ')}`.trim()], where)) {
+    say('ERR: not approved\n');
+    process.exit(3);
+  }
+}
+
 const b = new Bidi();
 try {
   await b.connect();
@@ -165,13 +198,17 @@ try {
     case 'text': {
       const ctx = await b.pick(flag('tab'));
       const t = await b.evaluate(ctx, 'document.body.innerText');
-      console.log(String(t).replace(/\n{3,}/g, '\n\n').slice(0, Number(flag('max', 4000))));
+      const body = String(t).replace(/\n{3,}/g, '\n\n').slice(0, Number(flag('max', 4000)));
+      emit('page text', await b.evaluate(ctx, 'location.href'), body, body,
+           { json: has('json'), raw: has('raw') });
       break;
     }
     case 'html': {
       const ctx = await b.pick(flag('tab'));
-      console.log(String(await b.evaluate(ctx, 'document.documentElement.outerHTML'))
-        .slice(0, Number(flag('max', 8000))));
+      const h = String(await b.evaluate(ctx, 'document.documentElement.outerHTML'))
+        .slice(0, Number(flag('max', 8000)));
+      emit('page html', await b.evaluate(ctx, 'location.href'), h, h,
+           { json: has('json'), raw: has('raw') });
       break;
     }
     case 'eval': {
@@ -184,7 +221,9 @@ try {
       const out = flag('out', `${DIR}shots/shot-${stamp()}.png`);
       const r = await b.send('browsingContext.captureScreenshot', {
         context: ctx, origin: has('full') ? 'document' : 'viewport' });
-      writeFileSync(out, Buffer.from(r.data, 'base64'));
+      writeFileSync(out, Buffer.from(r.data, 'base64'), { mode: 0o600 });
+      // A screenshot outlives the session and can hold anything on screen.
+      try { chmodSync(out, 0o600); } catch {}
       console.log(out);
       break;
     }
@@ -239,6 +278,42 @@ try {
       console.log('filled:', sel);
       break;
     }
+    // Same command, same shape as the Chromium backend.
+    case 'scroll': {
+      const ctx = await b.pick(flag('tab'));
+      const target = (positional[0] || 'down').toLowerCase();
+      const px = Number(flag('px', 600));
+      let landed;
+      if (target === 'to') {
+        const sel = positional[1];
+        if (!sel) throw new Error('scroll to <selector>: no selector given');
+        const ok = await b.evaluate(ctx, `(() => {
+          const e = document.querySelector(${JSON.stringify(sel)});
+          if (!e) return false;
+          e.scrollIntoView({ block: 'center' });
+          return true; })()`);
+        if (!ok) throw new Error(`no element matched "${sel}"`);
+        landed = `to ${sel}`;
+      } else {
+        if (!['up', 'down', 'top', 'bottom'].includes(target)) throw new Error(
+          `scroll: expected up, down, top, bottom or "to <selector>", got "${target}"`);
+        await b.evaluate(ctx, `(() => {
+          const t = ${JSON.stringify(target)}, px = ${px};
+          if (t === 'top') window.scrollTo({ top: 0 });
+          else if (t === 'bottom') window.scrollTo({ top: document.body.scrollHeight });
+          else window.scrollBy({ top: t === 'up' ? -px : px });
+          return true; })()`);
+        landed = target === 'top' || target === 'bottom' ? target : `${target} ${px}px`;
+      }
+      // documentElement, not body: see the note in gaze.mjs.
+      const at = JSON.parse(await b.evaluate(ctx, `(() => {
+        const doc = document.documentElement, bd = document.body;
+        const full = Math.max(doc.scrollHeight, bd ? bd.scrollHeight : 0);
+        return JSON.stringify({ y: Math.round(window.scrollY),
+          of: Math.max(0, Math.round(full - window.innerHeight)) }); })()`));
+      console.log(`scrolled ${landed} | at ${at.y}px of ${at.of}px`);
+      break;
+    }
     case 'scrape': {
       const ctx = await b.pick(flag('tab'));
       const attr = flag('attr', null);
@@ -248,7 +323,8 @@ try {
         .filter(v => v !== null && v !== ''))()`;
       const rows = await b.evaluate(ctx, `JSON.stringify(${js})`);
       const out = JSON.parse(rows);
-      console.log(has('json') ? JSON.stringify(out, null, 2) : out.join('\n'));
+      emit('scraped values', await b.evaluate(ctx, 'location.href'),
+           out.join('\n'), out, { json: has('json'), raw: has('raw') });
       break;
     }
     case 'links': {
@@ -261,8 +337,9 @@ try {
       rows = rows.filter(r => !seen.has(r.href) && seen.add(r.href));
       if (needle) rows = rows.filter(r => (r.text + ' ' + r.href).toLowerCase().includes(needle));
       rows = rows.slice(0, Number(flag('max', 200)));
-      console.log(has('json') ? JSON.stringify(rows, null, 2)
-                              : rows.map(r => `${r.text}\n      ${r.href}`).join('\n'));
+      emit('links', await b.evaluate(ctx, 'location.href'),
+           rows.map(r => `${r.text}\n      ${r.href}`).join('\n'), rows,
+           { json: has('json'), raw: has('raw') });
       break;
     }
     // Detect only. Solving is deliberately not implemented; see docs/SECURITY.md.

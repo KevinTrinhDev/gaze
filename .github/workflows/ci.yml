@@ -1,0 +1,65 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # The chromium self-test launches its own throwaway headless browser, so
+      # the download is required. Firefox is only used when one is already
+      # installed; firefox-selftest skips cleanly when it is not.
+      - name: install chromium for the self-test
+        run: npx playwright install --with-deps chromium
+
+      # record's mp4 output is optional by design and the suite skips it when
+      # ffmpeg is absent, but CI should exercise the real path rather than the
+      # fallback, so install it here.
+      - name: install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: syntax
+        run: |
+          node --check gaze.mjs
+          node --check gaze-bidi.mjs
+          node --check mcp.mjs
+
+      # Every backend has a headless self-test that never touches a real
+      # profile, and the bash launcher has one too. AGENTS.md requires all of
+      # them before committing, so CI runs exactly that set.
+      - name: chromium self-test
+        run: npm test
+
+      # The one people forget. It covers bin/gaze itself, where the two worst
+      # bugs this project has had actually lived.
+      - name: launcher self-test
+        run: npm run test:launcher
+
+      # Browser-free, so it runs everywhere. This is where the consent gate,
+      # the ticket accounting and the --yes bypass are asserted, deliberately
+      # NOT in a suite that can be skipped for environment reasons.
+      - name: consent self-test
+        run: npm run test:consent
+
+      - name: firefox self-test
+        run: npm run test:firefox
+
+      - name: mcp self-test
+        run: npm run test:mcp
