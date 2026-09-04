@@ -320,6 +320,8 @@ try {
   ab('indicator', 'on');
   const badgeOn = JSON.parse(ab('eval', '!!document.getElementById("__gaze_badge__")'));
   check('indicator draws a visible badge', badgeOn === true);
+  const badgeText = JSON.parse(ab('eval', 'document.getElementById("__gaze_badge__")?.shadowRoot?.textContent'));
+  check('indicator identifies Gaze, not another project', String(badgeText).includes('GAZE'));
   check('indicator status reports on', ab('indicator', 'status').includes('indicator on'));
   ab('goto', url, '--wait', '400');
   const badgeAfterNav = JSON.parse(ab('eval', '!!document.getElementById("__gaze_badge__")'));

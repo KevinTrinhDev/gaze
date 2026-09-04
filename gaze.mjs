@@ -881,8 +881,8 @@ async function dispatch(ctx, argv) {
         try { rmSync(INDICATOR_FILE, { force: true }); } catch {}
         console.log('indicator off');
       } else if (sub === 'on') {
-        writeFileSync(INDICATOR_FILE, flag('label', 'BASILISK is driving this browser'));
-        await p.evaluate(injectBadge, flag('label', 'BASILISK is driving this browser'));
+        writeFileSync(INDICATOR_FILE, flag('label', 'GAZE is driving this browser'));
+        await p.evaluate(injectBadge, flag('label', 'GAZE is driving this browser'));
         console.log('indicator on');
       } else {
         console.log(existsSync(INDICATOR_FILE) ? 'indicator on' : 'indicator off');
@@ -1001,7 +1001,7 @@ async function dispatch(ctx, argv) {
       // outside the repo that nothing ever cleaned up.
       const profileDir = process.env.GAZE_PROFILE_DIR;
       const DL = profileDir ? `${profileDir}/../gaze-downloads`
-                            : `${homedir()}/snap/brave/current/atarla-downloads`;
+                            : `${homedir()}/snap/brave/current/gaze-downloads`;
       fs.mkdirSync(DL, { recursive: true });
       fs.mkdirSync(`${DIR}downloads`, { recursive: true });
       const before = new Set(fs.readdirSync(DL));
