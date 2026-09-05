@@ -85,6 +85,22 @@ faster than finding, scoping and storing a token.
 - **No third-party solver services.** That is bot-detection evasion, it violates
   most sites' terms, and it puts the signed-in accounts at risk.
 
+## Running unattended (agents, CI, non-interactive shells)
+
+The gate fails closed with no terminal, which is deliberate. A tool call from an
+agent has no TTY, so a write returns `DENIED: no terminal to ask on`. Reads are
+unaffected. Two supported ways through, both fully audited in `gaze stats`:
+
+```bash
+gaze eval "document.title" --yes          # approve one command
+gaze grant --minutes 30 --yes             # approve a whole task, bounded
+gaze revoke --yes                         # close the window early
+```
+
+A standing grant is checked *before* the gate reaches for a terminal, so it
+works headlessly by design. Prefer it over `GAZE_APPROVAL=off`, which disables
+the gate everywhere instead of for one task.
+
 ## Testing without touching a real profile
 
 ```bash
