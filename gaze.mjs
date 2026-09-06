@@ -1206,6 +1206,52 @@ async function dispatch(ctx, argv) {
       break;
     }
 
+    // Bounded same-host crawl. Reads only: fetches pages the way goto does,
+    // stays on one origin, honours --max, skips fragments, and returns one
+    // enveloped row per page (title, heading, text size, outlink count).
+    case 'crawl': {
+      const p = pick(ctx, flag('tab'));
+      const start = flag('from', '') || p.url();
+      const max = Math.min(Math.max(Number(flag('max', 10)), 1), 50);
+      if (!/^https?:\/\//i.test(start)) throw new Error('crawl: --from must be an http(s) URL');
+      const origin0 = new URL(start).origin;
+      const visited = new Set();
+      const queue = [start];
+      const rows = [];
+      while (queue.length && rows.length < max) {
+        const u = queue.shift();
+        const canon = u.split('#')[0];
+        if (visited.has(canon)) continue;
+        visited.add(canon);
+        try { await p.goto(canon, { waitUntil: 'domcontentloaded', timeout: 20000 }); }
+        catch { continue; }
+        const info = await p.evaluate(() => {
+          const h = document.querySelector('h1');
+          const same = [];
+          for (const a of document.querySelectorAll('a[href]')) {
+            try {
+              const x = new URL(a.href, location.href);
+              if (x.origin === location.origin && x.pathname !== location.pathname)
+                same.push(x.href);
+            } catch {}
+          }
+          return { title: document.title,
+                   heading: h ? h.innerText.trim().slice(0, 120) : null,
+                   textChars: (document.body?.innerText || '').length,
+                   links: [...new Set(same)].slice(0, 60) };
+        });
+        rows.push({ url: p.url(), title: info.title, heading: info.heading,
+                    textChars: info.textChars, outlinks: info.links.length });
+        for (const l of info.links) {
+          const c = l.split('#')[0];
+          if (!visited.has(c) && new URL(c).origin === origin0) queue.push(c);
+        }
+      }
+      const pretty = rows.map(r => `${r.url}  ${r.title || '(no title)'}`).join('\n');
+      emit('crawl', origin0, pretty, rows, { json: has('json'), raw: has('raw') });
+      break;
+    }
+
     // Structured extraction: one command, a JSON schema of name -> CSS
     // selector, and one enveloped object back. Reads only.
     case 'extract': {
@@ -1379,6 +1425,7 @@ const USAGE = `gaze <cmd>
   links [--filter s] [--json]   every link on the page, deduped
   table [--nth N] [--json]      a table as rows
   extract --schema '{"n":"sel"}' one enveloped object from many selectors
+  crawl [--from url] [--max N]   bounded same-host crawl (read-only, enveloped)
   console [--seconds N]         console output over a window [--reload]
   network [--seconds N]         responses over a window. --json-only finds
           [--json-only]         the JSON API a page already calls.
@@ -1423,7 +1470,7 @@ const argv = process.argv.slice(2);
 // Help must work when NO browser is running: connecting first turned `gaze --help`
 // into a raw CDP "ECONNREFUSED" stack. Resolve help and unknown commands here,
 // before attach() is ever called.
-const KNOWN_CMDS = new Set(['tabs', 'goto', 'text', 'html', 'snapshot', 'state', 'wait', 'extract', 'map', 'shot', 'record', 'click', 'fill', 'press', 'select', 'hover', 'clear', 'doubleclick', 'scroll', 'eval', 'download', 'upload', 'indicator', 'scrape', 'links', 'table', 'console', 'network', 'session', 'challenge', 'wait-human', 'login', 'batch', 'stats', 'log', 'grant', 'revoke', 'grant-status']);
+const KNOWN_CMDS = new Set(['tabs', 'goto', 'text', 'html', 'snapshot', 'state', 'wait', 'extract', 'crawl', 'map', 'shot', 'record', 'click', 'fill', 'press', 'select', 'hover', 'clear', 'doubleclick', 'scroll', 'eval', 'download', 'upload', 'indicator', 'scrape', 'links', 'table', 'console', 'network', 'session', 'challenge', 'wait-human', 'login', 'batch', 'stats', 'log', 'grant', 'revoke', 'grant-status']);
 if (!argv.length || ['help', '--help', '-h'].includes(argv[0])) {
   console.log(USAGE);
   process.exit(0);

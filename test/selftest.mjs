@@ -437,6 +437,15 @@ try {
   check('extract fills every selector', ex.data.widget === 'widget' && ex.data.qty === '3' && ex.data.head === 'Name', JSON.stringify(ex.data));
   check('extract reports missing selectors as null', ex.data.missing === null);
 
+  // ---- bounded same-host crawl (ROADMAP part 4) ----
+  const crawl = JSON.parse(ab('crawl', '--from', url, '--max', '3', '--json'));
+  check('crawl returns enveloped rows',
+        crawl._untrusted === true && crawl.kind === 'crawl' && Array.isArray(crawl.data));
+  check('crawl respects --max and stays on one host',
+        crawl.data.length === 3 &&
+        crawl.data.every(r => String(r.url).includes('127.0.0.1') && r.title === 'fixture'),
+        JSON.stringify(crawl.data).slice(0, 300));
+
   // ---- batch: many commands, ONE connection ----
   const script = join(DIR, 'batch.tmp');
   writeFileSync(script, ['tabs', 'text --max 40', 'scrape "nav a" --max 3'].join('\n'));

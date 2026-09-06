@@ -57,6 +57,8 @@ gaze links --filter docs          # every link, deduped
 gaze table --nth 0 --json         # a table as rows
 gaze extract --schema '{"price":".price","name":"h1"}' --json
                                   # one enveloped object from many selectors
+gaze crawl --from https://site.example --max 20 --json
+                                  # bounded same-host crawl, enveloped rows
 ```
 
 ## Finding the real API
