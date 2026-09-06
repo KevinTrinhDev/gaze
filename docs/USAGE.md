@@ -55,6 +55,8 @@ gaze scrape "h2"                  # text of every match
 gaze scrape "a" --attr href       # an attribute instead
 gaze links --filter docs          # every link, deduped
 gaze table --nth 0 --json         # a table as rows
+gaze extract --schema '{"price":".price","name":"h1"}' --json
+                                  # one enveloped object from many selectors
 ```
 
 ## Finding the real API
