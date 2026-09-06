@@ -66,7 +66,7 @@ class Bidi {
     // Fire and forget: Firefox tears the socket down on session.end and never
     // sends a reply, so awaiting one blocks until the request times out.
     try { this.#ws.send(JSON.stringify({ id: ++this.#id, method: 'session.end', params: {} })); } catch {}
-    await new Promise(r => setTimeout(r, 150));
+    await new Promise(r => setTimeout(r, 250));
     try { this.#ws.close(); } catch {}
   }
 
@@ -154,6 +154,37 @@ const MAP_JS = includeChrome => `(() => {
   return JSON.stringify(out);
 })()`;
 
+// Accessibility-ish snapshot for the Firefox backend. BiDi has no Accessibility
+// domain and no locator.ariaSnapshot, so build a compact YAML of the visible
+// interactive controls (role + name + id) in-page and route it through the same
+// untrusted envelope as the Chromium backend's snapshot.
+const SNAP_JS = `(() => {
+  const SEL = 'a,button,input,select,textarea,[role],[contenteditable=true]';
+  const TAG = { a: 'link', button: 'button', select: 'combobox', textarea: 'textbox', input: 'textbox' };
+  const roleOf = e => e.getAttribute('role') || (e.tagName === 'INPUT'
+    ? ({ checkbox: 'checkbox', radio: 'radio', button: 'button', submit: 'button' }[e.type] || 'textbox')
+    : TAG[e.tagName.toLowerCase()] || 'generic');
+  const esc = s => String(s).replace(/"/g, '\\"');
+  const out = [];
+  const walk = root => {
+    let nodes = [];
+    try { nodes = root.querySelectorAll(SEL); } catch { return; }
+    for (const e of nodes) {
+      const r = e.getBoundingClientRect();
+      if (!r.width || !r.height) continue;
+      const labelled = e.labels && e.labels[0] ? e.labels[0].innerText : '';
+      const name = (e.getAttribute('aria-label') || e.placeholder || e.getAttribute('name') ||
+                    labelled || (e.innerText || '').trim() || e.title || '')
+        .replace(/\\s+/g, ' ').slice(0, 70);
+      const id = e.id ? ' [id=' + e.id + ']' : '';
+      out.push('- ' + roleOf(e) + (name ? ' "' + esc(name) + '"' : '') + id);
+    }
+    try { for (const e of root.querySelectorAll('*')) if (e.shadowRoot) walk(e.shadowRoot); } catch {}
+  };
+  walk(document);
+  return out.join('\\n');
+})()`;
+
 const CHALLENGE_JS = `(() => {
   const marks = ['iframe[src*="recaptcha"]','iframe[src*="hcaptcha"]',
     'iframe[src*="challenges.cloudflare.com"]','iframe[src*="turnstile"]',
@@ -224,6 +255,63 @@ try {
         .slice(0, Number(flag('max', 8000)));
       emit('page html', await b.evaluate(ctx, 'location.href'), h, h,
            { json: has('json'), raw: has('raw') });
+      break;
+    }
+    case 'snapshot': {
+      const ctx = await b.pick(flag('tab'));
+      const snap = String(await b.evaluate(ctx, SNAP_JS));
+      if (!snap.trim()) throw new Error('no accessibility snapshot available for this page');
+      const s = snap.slice(0, Number(flag('max', 6000)));
+      emit('a11y snapshot', await b.evaluate(ctx, 'location.href'), s, s,
+           { json: has('json'), raw: has('raw') });
+      break;
+    }
+    case 'state': {
+      const ctx = await b.pick(flag('tab'));
+      const n = Number(flag('max', 2500));
+      const meta = JSON.parse(await b.evaluate(ctx, `JSON.stringify((() => ({
+        url: location.href, title: document.title, ready: document.readyState,
+        scrollY: Math.round(window.scrollY || 0)
+      }))())`));
+      const snap = String(await b.evaluate(ctx, SNAP_JS));
+      const { createHash } = await import('node:crypto');
+      const fingerprint = createHash('sha256')
+        .update(meta.url + '\n' + meta.title + '\n' + snap).digest('hex');
+      const data = { ...meta, fingerprint, snapshot: snap.slice(0, n) };
+      emit('page state', data.url,
+           `url: ${data.url}\ntitle: ${data.title}\nready: ${data.ready}\n` +
+           `fingerprint: ${data.fingerprint}`,
+           data, { json: has('json'), raw: has('raw') });
+      break;
+    }
+    case 'wait': {
+      const ctx = await b.pick(flag('tab'));
+      const forWhat = (flag('for', 'selector') || 'selector').toLowerCase();
+      const needle = positional[0] || '';
+      const limit = Math.min(Math.max(Number(flag('timeout', 30)), 1), 300) * 1000;
+      if (forWhat === 'network-idle')
+        throw new Error('network-idle is not supported on the Firefox backend');
+      if (!needle || !['selector', 'url', 'text'].includes(forWhat))
+        throw new Error('usage: gaze wait --for selector|url|text <needle> [--timeout s]');
+      const started = Date.now();
+      let ok = false, closed = false;
+      while (Date.now() - started < limit) {
+        try {
+          if (forWhat === 'url') ok = String(await b.evaluate(ctx, 'location.href')).includes(needle);
+          else if (forWhat === 'text') ok = String(await b.evaluate(ctx, '(document.body ? document.body.innerText : "")')).includes(needle);
+          else ok = !!await b.evaluate(ctx, `!!document.querySelector(${JSON.stringify(needle)})`);
+        } catch { closed = true; }
+        if (ok || closed) break;
+        await new Promise(r => setTimeout(r, 200));
+      }
+      if (!ok) {
+        console.error(closed ? 'ERR: page closed while waiting'
+                             : `ERR: never ${forWhat} '${needle}' within ${limit / 1000}s`);
+        process.exitCode = 1;
+        break;
+      }
+      const waited = Math.round((Date.now() - started) / 100) / 10;
+      console.log(`waited ${waited}s for ${forWhat} '${needle}'`);
       break;
     }
     case 'eval': {
@@ -405,16 +493,23 @@ try {
     default:
       console.log(`gaze (firefox/BiDi backend) <cmd>
   tabs [--json] | goto <url> | text [--max N] | html [--max N]
+  snapshot [--max N] [--json] | state [--max N] [--json]
+  wait --for selector|url|text <needle> [--timeout s]
   map [--nav] [--filter s] [--max N] [--json] | shot [--out f] [--full]
-  click <sel> [--text] | fill <sel> <val> [--enter] | eval "<js>"
+  click <sel> [--text] | fill <sel> <val> [--enter] | scroll | eval "<js>"
 
-  scrape <sel> [--attr a] | links [--filter s] | challenge | wait-human
+  scrape <sel> [--attr a] | links [--filter s] | challenge [--explain]
+  | wait-human
 
-  Chromium-only for now: press, download, session, login, batch.`);
+  Chromium-only for now: press, download, upload, record, table, console,
+  network, session, login, batch, indicator, wait --for network-idle.`);
   }
 } catch (e) {
   console.error('ERR:', e.message);
-  process.exit(1);
+  // Never process.exit() here: the finally below closes the BiDi session, and
+  // a session left open leaks into the NEXT command ("session does not exist,
+  // or is not active"). Set the code and let cleanup run, then exit naturally.
+  process.exitCode = 1;
 } finally {
   await b.close();
 }
