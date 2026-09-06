@@ -9,6 +9,23 @@ and the decisions that change how gaze is built live in
 [`docs/RESEARCH.md`](RESEARCH.md). The honest competitor comparison is
 [`docs/COMPARISON.md`](COMPARISON.md).
 
+## Progress — 2026-09-06
+
+Implemented, tested and merged to `main`:
+
+| Part | What shipped | PR |
+|---|---|---|
+| Docs & research | roadmap, annexes, refreshed comparison/research, slim README | #5 |
+| Test infra | `GAZE_DRIVER` pin for the self-test | #6 |
+| 1 · speed & perception | `snapshot`, `state` fingerprint, `wait`, `--wait calm`/`GAZE_WAIT=calm` | #7 |
+| 7 · challenge depth | Arkose/Kasada/GeeTest/AWS-WAF markers + `challenge --explain` | #8 |
+
+In review/implementation: **3 · persistent stdio driver** and **4 · Firefox
+perception parity** (snapshot/state/wait on BiDi). Queued: the rest of part 4
+(extract, bounded crawl, missing primitives, Firefox trusted input), **5 ·
+any-browser/OS** (discovery, Node launcher, identities), **6 · observability
+ledger**, **8 · WebDriver-classic reach**, then a release tag.
+
 ## The goal, in plain words
 
 gaze should be the layer that **finds a way in on whatever browser and OS it is
