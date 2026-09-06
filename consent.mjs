@@ -66,7 +66,8 @@ export const APPROVAL = process.env.GAZE_APPROVAL || 'prompt';
 // next token as its value, and a VALUE is never consent: `gaze fill --timeout
 // --yes` must not approve anything.
 const BOOLEAN_FLAGS = new Set(['yes', 'full', 'enter', 'new', 'nav', 'json',
-  'text', 'raw', 'reload', 'json-only', 'submit', 'totp', 'headed', 'headless']);
+  'text', 'raw', 'reload', 'json-only', 'submit', 'totp', 'headed', 'headless',
+  'explain']);
 
 // GAZE_YES=1 is the channel for PROGRAMMATIC callers, and it exists because
 // argv fundamentally cannot carry consent safely. `gaze fill "#note" -- --yes`
