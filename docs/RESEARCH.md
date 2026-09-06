@@ -139,3 +139,142 @@ Every source repeats the same caveat: **each of these leaks eventually and needs
 re-patching after browser updates.** A design that depends on winning that race is
 a design with a maintenance treadmill attached. `gaze` deliberately does not enter
 it.
+
+---
+
+# 2026 landscape update
+
+Fresh research pass, 2026-09-06. Sources per claim; the full annex is
+[`browser-automation-landscape-2026.md`](browser-automation-landscape-2026.md),
+and the strategy it feeds is in [`ROADMAP.md`](ROADMAP.md).
+
+## Perception: accessibility snapshots are the agent default
+
+Playwright MCP's design is explicit: its accessibility snapshot is "better than
+screenshot" — text-only, deterministic, no vision model
+([README](https://github.com/microsoft/playwright-mcp)). Playwright removed the
+long-deprecated `page.accessibility` (CDP-only) in v1.57 and standardised on
+`locator.ariaSnapshot()` (YAML) with `ariaSnapshotJSON()` and `mode:'ai'` refs
+([ARIA snapshots](https://playwright.dev/docs/aria-snapshots)). Skyvern
+observes ARIA/shadow-DOM/cross-origin iframes; browser-use serialises the DOM.
+
+**What it changes:** `map` (CSS selectors, good for humans) should gain an a11y
+snapshot mode (`map --aria`/`snapshot`) as the default agent-facing read, and a
+`state` command that returns snapshot + fingerprint so callers detect change
+without re-reading pixels. Chromium: `locator.ariaSnapshot()` is already in the
+installed Playwright. Firefox: small in-page ARIA builder via BiDi
+`script.evaluate` (no DOMSnapshot/a11y tree exists on the BiDi side yet).
+
+## Attach vs snapshot vs launch — the three session models
+
+Playwright's docs distinguish them cleanly
+([connectOverCDP](https://playwright.dev/docs/api/class-browsertype#browser-type-connect-over-cdp),
+[auth guide](https://playwright.dev/docs/auth)): `storageState` is a
+point-in-time snapshot (cookies + localStorage only); `launchPersistentContext`
+is a browser *you* launch — no two instances may share one userDataDir;
+`connectOverCDP` is the only true *attach to the operator's already-running
+browser*. Chrome 136 (Mar 2025) made a non-default `--user-data-dir` mandatory
+for remote debugging
+([Chrome blog](https://developer.chrome.com/blog/remote-debugging-port)), which
+is exactly the clone model. Playwright 1.60 added `noDefaults` to
+`connectOverCDP` for daily-driver attach; multiple CDP clients per browser have
+been supported since Chrome 63.
+
+**What it changes:** keep clone-for-identity and reserve `connectOverCDP` for
+live-shared Chromium (operator watching/taking over the same window); document
+that storageState misses IndexedDB/sessionStorage and that DBSC-bound sites will
+not replay on another machine.
+
+## WebDriver BiDi: the cross-browser future is not a standard yet
+
+BiDi is still a W3C **Working Draft** as of 2026-09-03 (FPWD 2024-11-21)
+([spec](https://www.w3.org/TR/webdriver-bidi/),
+[history](https://www.w3.org/standards/history/webdriver-bidi/)), shipped in
+Chrome 106 and Firefox 102. Firefox's Remote Agent is BiDi-only now (CDP removed
+~FF 141), starts only with `--remote-debugging-port` at launch (no attach to a
+running agent-less Firefox), and Firefox reports `navigator.webdriver === true`
+while a Marionette/BiDi session is active
+([MDN](https://developer.mozilla.org/en-US/docs/Web/API/Navigator/webdriver);
+verify against real targets).
+
+**What it changes:** the Firefox model stays clone + own instance. Add a
+self-test/verification for the `navigator.webdriver` signal. Track BiDi module
+growth (`storage.getCookies`, `log.entryAdded`, `network.*`,
+`input.performActions`, user contexts) as the path to Firefox parity without
+CDP.
+
+## Real headed profile beats stealth — with one caveat
+
+The 2025-2026 verdict across sources: JS-injection stealth is largely obsolete
+against managed challenges (puppeteer-extra #920; Camoufox's C++-level
+argument; DataDome's CDP-session detection; Castle.io). A measured reCAPTCHA v3
+study found near-identical synthetic traces scored 0.1–0.3 clean but passed in a
+real profile — environment authenticity dominates trace perfection
+([arXiv 2607.18659](https://arxiv.org/abs/2607.18659)). But the *control
+channel* itself leaks: DataDome detects CDP-driven sessions, Patchright exists
+because `Runtime.enable`/`Console.enable` are detectable, and behavioural +
+network-reputation signals dominate once browser artifacts are clean
+(Cloudflare [engines](https://developers.cloudflare.com/bots/concepts/bot-detection-engines/),
+[clearance](https://developers.cloudflare.com/cloudflare-challenges/concepts/clearance/)).
+
+**What it changes:** nothing in the code — it *confirms* the existing stance
+(one consistency fix via Patchright, no camouflage). Keep the headed default.
+Add the caveats to the challenge docs: a hard 403 usually means network/ASN;
+an interactive challenge usually means behaviour/driver suspicion.
+
+## CAPTCHA solving: a throughput business gaze does not need to join
+
+Solver measurements (Jul-2026): Turnstile and reCAPTCHA v2 solve ~100%,
+reCAPTCHA v3 solver tokens clear ≥0.5 only 0–63%, and hCaptcha is being dropped
+(only 2 of 7 providers still sell it; CapSolver removed it)
+([arXiv 2607.18659](https://arxiv.org/abs/2607.18659), [CapSolver pricing](https://docs.capsolver.com/vi/pricing/)).
+Tokens are minted in the solver's environment and injected into yours — a
+behaviour mismatch risk on a high-trust profile. Challenge verdicts key on the
+whole environment (Camoufox users got "invalid-response" on Discord hCaptcha
+despite correct solves: [camoufox #429](https://github.com/daijro/camoufox/issues/429)).
+
+**What it changes:** default stays detect → pause → notify → human clears →
+resume (token minted in-session, no injection race). ROADMAP §7 documents the
+one narrow opt-in a domain owner could switch on (reCAPTCHA v2/Turnstile only,
+success-tracked), and why v3/hCaptcha-Enterprise/in-browser auto-clicking on an
+authenticated profile stay off.
+
+## Recording that scales: change-driven ledger, not constant video
+
+CDP `Page.startScreencast` is variable-rate — frames only when the page
+repaints — which is a feature for audit time-lapse, not a bug
+([Page domain](https://chromedevtools.github.io/devtools-protocol/tot/Page/)).
+Playwright's own bundled video is hardcoded vp8/1 Mbps with no libx264
+([deep dive](https://dev.to/mutsuntsai/replacing-playwrights-hardcoded-vp8-encoder-a-deep-dive-into-pagescreencast-43ee)).
+The ecosystem's replayable artifact is an action + before/after snapshot +
+console/network trail (Playwright trace; Stagehand's per-act logs; Browserbase's
+per-session video/HLS).
+
+**What it changes:** roadmap adopts a per-step NDJSON ledger with a `sha256`
+state fingerprint and screenshot-on-change; video stays opt-in and bounded.
+One injected snapshotter shared by both backends keeps parity
+(CDP `Page.addScriptToEvaluateOnNewDocument`, BiDi `script.addPreloadScript`).
+
+## DBSC and the clone's half-life
+
+DBSC (device-bound session credentials) is GA on Chrome/Windows, TPM-bound with
+silent refresh
+([Chrome blog](https://developer.chrome.com/blog/dbsc-windows-announcement));
+Firefox has none and is evaluating. Adoption is server-side, so clone erosion is
+site-by-site.
+
+**What it changes:** nothing in code — but `doctor` should surface clone age vs
+cookie age so a stale clone is diagnosed as "re-run `gaze sync`", not a bug.
+
+## Sources added in this pass
+
+[Playwright MCP](https://github.com/microsoft/playwright-mcp) ·
+[ARIA snapshots](https://playwright.dev/docs/aria-snapshots) ·
+[BiDi spec](https://www.w3.org/TR/webdriver-bidi/) ·
+[Chrome 136 change](https://developer.chrome.com/blog/remote-debugging-port) ·
+[arXiv 2607.18659](https://arxiv.org/abs/2607.18659) ·
+[Cloudflare engines](https://developers.cloudflare.com/bots/concepts/bot-detection-engines/) ·
+[Cloudflare clearance](https://developers.cloudflare.com/cloudflare-challenges/concepts/clearance/) ·
+[CapSolver](https://docs.capsolver.com/vi/pricing/) ·
+[CDP Page domain](https://chromedevtools.github.io/devtools-protocol/tot/Page/) ·
+[Chrome DBSC](https://developer.chrome.com/blog/dbsc-windows-announcement)
