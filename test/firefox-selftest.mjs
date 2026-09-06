@@ -124,6 +124,32 @@ try {
   const rawFf = JSON.parse(ab('scrape', 'nav a', '--json', '--raw'));
   check('--raw opts out of the envelope on Firefox too',
         Array.isArray(rawFf) && rawFf.length === 130);
+
+  // ---- perception parity with the Chromium backend (ROADMAP part 4) ----
+  const snap = JSON.parse(ab('snapshot', '--json', '--max', '4000'));
+  check('firefox snapshot returns an enveloped a11y tree',
+        snap._untrusted === true && snap.kind === 'a11y snapshot'
+        && String(snap.data).length > 50, `snapshot ${String(snap.data).length} chars`);
+  const st1 = JSON.parse(ab('state', '--json', '--raw'));
+  const st2 = JSON.parse(ab('state', '--json', '--raw'));
+  check('firefox state reports the real url', String(st1.url).includes('127.0.0.1'));
+  check('firefox state fingerprint is sha256', /^[0-9a-f]{64}$/.test(st1.fingerprint));
+  check('firefox state fingerprint is stable', st1.fingerprint === st2.fingerprint);
+  const hostProbe = new URL(url).host;
+  const wUrl = ab('wait', '--for', 'url', hostProbe, '--timeout', '5');
+  check('firefox wait --for url returns when satisfied', /waited .* for url/.test(wUrl), wUrl.trim());
+  const wSel = ab('wait', '--for', 'selector', 'input', '--timeout', '5');
+  check('firefox wait --for selector returns when satisfied', /waited .* for selector/.test(wSel), wSel.trim());
+  let wOut = '', wCode = 0;
+  try { ab('wait', '--for', 'selector', '#nope', '--timeout', '1'); }
+  catch (e) { wOut = (e.stdout || '') + (e.stderr || ''); wCode = e.status; }
+  check('firefox wait times out with exit 1', wCode === 1 && /never selector/.test(wOut), `exit ${wCode}`);
+  let niOut = '', niCode = 0;
+  try { ab('wait', '--for', 'network-idle', 'x', '--timeout', '1'); }
+  catch (e) { niOut = (e.stdout || '') + (e.stderr || ''); niCode = e.status; }
+  check('firefox wait --for network-idle errors clearly',
+        niCode === 1 && /not supported on the Firefox backend/.test(niOut), `exit ${niCode}`);
+
   check('no false challenge on a normal page', ab('challenge').includes('no challenge detected'));
   ab('goto', url + 'challenged');
   let cOut = '', cCode = 0;
@@ -158,6 +184,8 @@ try {
         gated('fill', 'input[name="email"]', 'ok@example.test', '--yes').code === 0);
   check('a selector named --yes cannot approve its own Firefox write',
         gated('fill', '--', '--yes', 'spoofed@example.test').code === 3);
+  check('firefox snapshot stays ungated', gated('snapshot').code === 0);
+  check('firefox wait stays ungated', gated('wait', '--for', 'url', hostProbe, '--timeout', '1').code === 0);
 
   console.log(`${pass} passed, ${fail} failed`);
 } catch (e) {

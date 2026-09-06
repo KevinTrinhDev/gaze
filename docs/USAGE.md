@@ -44,7 +44,9 @@ gaze wait --for text "Complete"
 gaze wait --for network-idle x --timeout 20 # 600ms with no responses
 ```
 
-All three are reads and never prompt.
+All three are reads and never prompt. `snapshot`, `state` and `wait` are also
+available on the Firefox backend (BiDi), with one exception: `wait --for
+network-idle` needs CDP-style response events, so it errors clearly on Firefox.
 
 ## Extracting data
 
