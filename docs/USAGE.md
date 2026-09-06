@@ -185,6 +185,20 @@ printf 'goto https://example.com\nmap --json\nscrape h1\n' | gaze batch -
 gaze batch script.txt
 ```
 
+Fixed post-action sleeps are the difference between responsive and fast when an
+agent runs hundreds of steps. `goto`, `click`, `fill --enter` and `press`
+accept `--wait calm`, which settles on real page quiet — no responses for a
+window, DOM node count stable, `readyState` complete — instead of sleeping a
+fixed number of milliseconds. It is bounded, so calm mode is never slower than
+the sleep it replaces:
+
+```bash
+gaze click "#signin" --yes --wait calm
+export GAZE_WAIT=calm      # the whole run, including batch
+```
+
+A numeric `--wait` (e.g. `--wait 2000`) keeps the old predictable behaviour.
+
 ## Credentials
 
 ```bash

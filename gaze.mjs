@@ -227,6 +227,42 @@ async function ariaOf(p) {
   });
 }
 
+// Fixed sleeps after goto/click are the difference between "responsive" and
+// "super fast" for an agent that runs hundreds of steps. `--wait calm` (or
+// GAZE_WAIT=calm for a whole run) replaces the millisecond count with a real
+// settle: the page is calm when no responses have arrived for a quiet window
+// AND the DOM node count is stable AND readyState is complete. Worst case is
+// bounded by capMs, so calm mode is never slower than the sleep it replaces.
+async function calmPage(p, capMs) {
+  const started = Date.now();
+  let quiet = 0;
+  let lastN = -1;
+  const onResp = () => { quiet = 0; };
+  p.on('response', onResp);
+  try {
+    while (Date.now() - started < capMs) {
+      const n = await p.evaluate(() =>
+        document.readyState === 'complete' ? document.querySelectorAll('*').length : -1)
+        .catch(() => -1);
+      if (n === -1) { quiet = 0; lastN = -1; }
+      else if (n === lastN) quiet += 200;
+      else { lastN = n; quiet = 0; }
+      if (Date.now() - started >= 250 && quiet >= 400) break;
+      await p.waitForTimeout(200);
+    }
+  } finally { p.off('response', onResp); }
+}
+
+// The `--wait` value for a command: explicit `--wait calm` opts into settling;
+// explicit milliseconds keep the old predictable behaviour; unset keeps today's
+// defaults unless GAZE_WAIT=calm opts the whole run in.
+function wantCalm(w) { return w === 'calm' || (w === undefined && process.env.GAZE_WAIT === 'calm'); }
+function wantMs(w, def) {
+  if (w !== undefined) return Number(w);
+  const env = process.env.GAZE_WAIT;
+  return env && env !== 'calm' ? Number(env) : def;
+}
+
 // Compact interactive-element map. Hides page chrome by default so main content
 // is not crowded out, walks open shadow roots, emits a reusable selector.
 const collect = (includeChrome) => {
@@ -441,7 +477,11 @@ async function dispatch(ctx, argv) {
       const url = positional[0];
       const p = has('new') ? await ctx.newPage() : pick(ctx, flag('tab'));
       await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-      await p.waitForTimeout(Number(flag('wait', 1500)));
+      {
+        const w = flag('wait');
+        if (wantCalm(w)) await calmPage(p, 2000);
+        else await p.waitForTimeout(wantMs(w, 1500));
+      }
       // A page load wipes injected DOM, so put the badge back.
       if (existsSync(INDICATOR_FILE)) {
         try { await p.evaluate(injectBadge, readFileSync(INDICATOR_FILE, 'utf8')); } catch {}
@@ -481,7 +521,11 @@ async function dispatch(ctx, argv) {
         () => locate(p, sel, { text: has('text'), timeout: Number(flag('timeout', 15000)) }));
       const note = await withRetry(
         () => clickEscalating(loc, Number(flag('timeout', 15000))));
-      await p.waitForTimeout(Number(flag('wait', 1200)));
+      {
+        const w = flag('wait');
+        if (wantCalm(w)) await calmPage(p, 1500);
+        else await p.waitForTimeout(wantMs(w, 1200));
+      }
       console.log(`clicked: ${sel}${how === 'selector' ? '' : ` (matched by ${how})`}` +
                   `${note} | now: ${p.url()}`);
       break;
@@ -492,14 +536,23 @@ async function dispatch(ctx, argv) {
       const { loc, how } = await withRetry(
         () => locate(p, sel, { timeout: Number(flag('timeout', 15000)) }));
       await withRetry(() => loc.fill(val, { timeout: Number(flag('timeout', 15000)) }));
-      if (has('enter')) { await p.keyboard.press('Enter'); await p.waitForTimeout(2000); }
+      if (has('enter')) {
+        await p.keyboard.press('Enter');
+        const w = flag('wait');
+        if (wantCalm(w)) await calmPage(p, 2500);
+        else await p.waitForTimeout(wantMs(w, 2000));
+      }
       console.log(`filled: ${sel}${how === 'selector' ? '' : ` (matched by ${how})`}`);
       break;
     }
     case 'press': {
       const p = pick(ctx, flag('tab'));
       await p.keyboard.press(positional[0]);
-      await p.waitForTimeout(Number(flag('wait', 1000)));
+      {
+        const w = flag('wait');
+        if (wantCalm(w)) await calmPage(p, 1500);
+        else await p.waitForTimeout(wantMs(w, 1000));
+      }
       console.log('pressed:', positional[0]);
       break;
     }
@@ -1197,6 +1250,9 @@ const USAGE = `gaze <cmd>
  speed
   batch <file>                  run many commands over ONE connection
   batch -                       ... read them from stdin
+  --wait calm                   settle on page quiet instead of fixed ms
+  GAZE_WAIT=calm                (goto/click/fill --enter/press), or set
+                                GAZE_WAIT=calm to opt a whole run in
 
  consent (full capability, gated)
   write actions ask first: click fill press download eval login

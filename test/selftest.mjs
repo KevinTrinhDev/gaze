@@ -391,6 +391,20 @@ try {
   check('snapshot stays ungated', gated('snapshot').code === 0);
   check('wait stays ungated', gated('wait', '--for', 'url', hostProbe, '--timeout', '1').code === 0);
 
+  // --wait calm settles on page quiet instead of a fixed sleep. It must finish
+  // well under the fixed 1500ms default on this static fixture.
+  const calmT0 = Date.now();
+  ab('goto', url + 'interstitial', '--wait', 'calm');
+  const calmMs = Date.now() - calmT0;
+  check(`goto --wait calm settles instead of sleeping (${calmMs}ms)`,
+        calmMs < 2400 && calmMs >= 150, `${calmMs}ms`);
+  const calmEnv = execFileSync('node',
+    [join(DIR, '..', 'gaze.mjs'), 'goto', url + 'passive'],
+    { env: { ...process.env, GAZE_PORT: String(PORT), GAZE_STATE: state,
+             GAZE_APPROVAL: 'off', GAZE_WAIT: 'calm' },
+      encoding: 'utf8', timeout: 15000 });
+  check('GAZE_WAIT=calm opts a whole run in', calmEnv.includes('URL:'));
+
   // ---- batch: many commands, ONE connection ----
   const script = join(DIR, 'batch.tmp');
   writeFileSync(script, ['tabs', 'text --max 40', 'scrape "nav a" --max 3'].join('\n'));
