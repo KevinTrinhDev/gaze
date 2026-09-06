@@ -26,11 +26,13 @@ Implemented, tested and merged to `main`:
 | 4 · crawl | bounded same-host crawl (`crawl --from --max`) | #15 |
 | 6 · observability | opt-in per-step trace ledger (`GAZE_TRACE=1`) | #16 |
 | 8 · WebDriver classic | experimental client scaffold (`webdriver.mjs`) | #17 |
+| 5 · discovery probe | `browsers.mjs` PATH/snap/flatpak scan → family/version | #19 |
 
-Queued: **3 · persistent stdio driver** and **5 ·
-any-browser/OS** (discovery, Node launcher, identities), then a release tag.
+Queued: **3 · persistent stdio driver** and **5 · remainder**
+(capability resolver, CfT/headless-shell rows, Node launcher, named
+identities), then a release tag.
 Suites tracked on every merge: chromium 133 · launcher 30 · consent 31 ·
-firefox 38 · mcp 11 · webdriver 13.
+firefox 38 · mcp 11 · webdriver 13 · browsers 6.
 
 ## The goal, in plain words
 
