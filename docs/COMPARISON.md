@@ -108,6 +108,22 @@ Excellent observability (per-session video, HLS replay) and scale, but they are
 *their* browsers in *their* datacenters. Sessions can be imported, but you are
 not driving the browser that is already signed in on your desk.
 
+### The wider market (2026) — AI-native browsers and the "drive my browser" niche
+The 2026 field is bigger than the table above, and its shape validates gaze's
+lane. **AI-native browsers** (Comet, Dia→Atlassian, Polar, Tabbit) and
+**vendor-embedded agents** (Claude in Chrome, ChatGPT Side Chat, Gemini in
+Chrome) all either own the browser or tie you to one lab's client — and
+OpenAI's standalone ChatGPT Atlas browser **shut down in Aug 2026 after <10
+months**, with industry analysis concluding the moat is the *execution
+environment* (identity, sessions, provenance, audit), not the browser. The
+fastest-growing niche — **extension→MCP "drive my real logged-in Chrome" tools**
+(browsermcp.io, chrome-faithful, real-browser-mcp, vibe-mcp, Kimi WebBridge,
+Manus Browser Operator) — validates real-profile control but every one of them
+requires installing an extension and is Chrome-first. gaze's levers against all
+of them: **no extension, Firefox via BiDi, deterministic non-LLM execution,
+enforceable consent, injection-safe output, audit/revoke**. Details and sources
+in [`browser-market-and-adoption-2026.md`](browser-market-and-adoption-2026.md).
+
 ---
 
 ## What is genuinely ours

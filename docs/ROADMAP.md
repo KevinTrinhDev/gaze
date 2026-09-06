@@ -143,18 +143,29 @@ browser on any OS". Replace the *concept*, not just the file:
   `navigator.webdriver` under BiDi (documented true in Firefox) and how much it
   actually costs a signed-in, headed Firefox on real targets; add a self-test
   that asserts the visible window still reads as a browser, not a bot.
-- **Safari/WebKit**: no CDP/BiDi — W3C WebDriver-classic via `safaridriver`,
-  macOS-only, requires the human to enable Remote Automation. The WebDriver
-  adapter (§3.3) is the only honest route and cannot be *tested* on Linux:
-  scope it with a macOS CI job and label it experimental until a real run
-  exists.
+- **Safari/WebKit**: two tiers (research pass #2). **Tier 1 — preferred:**
+  Safari 27 beta / STP 247 ships `safaridriver --mcp`, Apple's official
+  MCP/stdio server that drives the *real* signed-in Safari with tabs, DOM,
+  network and console — the first Safari surface that honors genuine login
+  state ([WebKit blog](https://webkit.org/blog/18136/introducing-the-safari-mcp-server-for-web-developers/)).
+  **Tier 2 — fallback:** W3C WebDriver-classic via `safaridriver` for
+  clean-profile work, clearly labelled "no saved sign-in" (classic Safari
+  cannot honor profile clones — it runs a fresh profile each session). Neither
+  can be tested on Linux: scope with a macOS CI job, label experimental.
 
 ### 3.3 A thin WebDriver-classic adapter (reach, built last)
 One adapter speaking the W3C WebDriver REST protocol (`session/new`, find
-element, click, send keys, screenshot, script execute) gives gaze any browser
-with a WebDriver endpoint. Same CLI, same consent, same envelope. Costs:
-per-command HTTP round-trips and no push events (slower, polling for
-state) — acceptable for *reach*; CDP/BiDi remain the fast paths.
+element, click, send keys, screenshot, script execute — the surface is small
+and stable: ~30 endpoints, element refs under the fixed key
+`element-6066-11e4-a52e-4f735466cecf`) gives gaze any browser with a WebDriver
+endpoint: **~400–800 LOC over Node's global `fetch`**, fitting the zero-magic
+ethos; classic is the *fallback* path, not the core
+([WebDriver 2](https://www.w3.org/TR/webdriver2/)). Costs: per-command HTTP
+round-trips and **no console/network/push events** — gate those features on
+CDP/BiDi and degrade gracefully (execute-script shims). Reuse **Selenium
+Manager as a standalone binary** for driver provisioning (chromedriver /
+msedgedriver / geckodriver / WebKitWebDriver) rather than pulling in a Selenium
+stack.
 
 ### 3.4 OS universality
 - **Port `bin/gaze` to Node** (`bin/gaze.mjs`, thin and auditable): removes the
@@ -222,7 +233,10 @@ state) — acceptable for *reach*; CDP/BiDi remain the fast paths.
 - **Freshness signals**: `doctor` should warn when the clone is older than the
   cookies it carries and offer `sync` — the clone is a point-in-time copy of
   the human's identity and erodes site by site (DBSC adoption, session
-  rotation), never all at once.
+  rotation), never all at once. **DBSC is GA on Chrome/Windows (2026):**
+  cookies are device-bound, so clones are *per machine* — `gaze sync` across
+  machines silently breaks Google sessions; document that a clone travels with
+  the machine, not the account.
 - **Keep the model**: profile clone for identity, plus `connectOverCDP` attach
   for live-shared Chromium where the operator wants to watch and take over the
   exact same window. Research is unambiguous that storageState is a snapshot
@@ -281,6 +295,15 @@ Research-refined decisions:
   in-browser auto-clicking on an authenticated profile, sharing tokens across
   machines. Default remains refuse-and-pause. This is a product decision for
   the owner to switch on per domain — never something gaze does silently.
+- **Watch items (research pass #2)**: Mozilla's official Firefox DevTools MCP
+  (`@mozilla/firefox-devtools-mcp`, BiDi-based) as the parity reference for
+  gaze's Firefox surface; Chrome's two-week release cadence (keeps
+  Patchright/Playwright pins and Chrome-for-Testing current); Chrome built-in
+  AI APIs as a new fingerprint surface (keep `navigator.ai` stable across
+  clones); WebMCP / Mozilla AAF site annotations and agent-browser runtimes
+  (Cloudflare Kitesurf, BrowserOS) as threats and integration surfaces;
+  MCP spec 2026-07-28 (stateless, versioned extensions) as a scheduled
+  `mcp.mjs` migration.
 
 ---
 
@@ -348,6 +371,10 @@ the exit-code contracts (0/1/2/3).
   (browser-use, Stagehand, Playwright MCP, Chrome DevTools MCP, Puppeteer MCP,
   Skyvern, Browserbase, Steel, midscene, Camoufox, Anthropic/OpenAI/Google
   computer-use), with numbered sources.
+- `docs/browser-market-and-adoption-2026.md` — second-pass annex: adoption
+  short-list (WebMCP, Mozilla AAF, Webwright, Firefox DevTools MCP,
+  `safaridriver --mcp`, Selenium Manager), market signals, wider competitive
+  set, and any-browser implementation strategy.
 - Chrome 136 remote-debugging change:
   https://developer.chrome.com/blog/remote-debugging-port · Chrome for Testing:
   https://developer.chrome.com/docs/automation-and-testing/chrome-for-testing
