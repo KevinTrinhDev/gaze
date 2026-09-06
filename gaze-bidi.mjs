@@ -351,34 +351,82 @@ try {
       }
       break;
     }
-    // Firefox/BiDi has input.performActions, but a JS click covers the cases we
-    // actually use and keeps the selector syntax identical to the Chromium path.
+    // Firefox/BiDi has input.performActions; a trusted pointer click is what a
+    // real user produces, so sites that check isTrusted behave correctly. When
+    // the element has no layout (or BiDi refuses), fall back to the JS click.
     case 'click': {
       const ctx = await b.pick(flag('tab'));
       const sel = positional[0];
-      const ok = await b.evaluate(ctx, has('text')
-        ? `(() => { const el = [...document.querySelectorAll('a,button,[role=button],input,label')]
-             .find(e => (e.innerText||e.value||'').includes(${JSON.stringify(sel)}));
-             if (!el) return false; el.click(); return true; })()`
-        : `(() => { const el = document.querySelector(${JSON.stringify(sel)});
-             if (!el) return false; el.click(); return true; })()`);
-      if (!ok) { console.error('ERR: no element matched', sel); process.exit(1); }
+      const finder = has('text')
+        ? `[...document.querySelectorAll('a,button,[role=button],input,label')]
+             .find(e => (e.innerText||e.value||'').includes(${JSON.stringify(sel)}))`
+        : `document.querySelector(${JSON.stringify(sel)})`;
+      const pt = JSON.parse(await b.evaluate(ctx, `JSON.stringify((() => {
+        const el = ${finder}; if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2),
+                 vis: r.width > 0 && r.height > 0 };
+      })())`));
+      if (!pt) { console.error('ERR: no element matched', sel); process.exitCode = 1; break; }
+      let native = false;
+      if (pt.vis) {
+        try {
+          await b.send('input.performActions', {
+            context: ctx,
+            actions: [{ type: 'pointer', id: 'mouse', parameters: { pointerType: 'mouse' },
+              actions: [{ type: 'pointerMove', duration: 0, x: pt.x, y: pt.y },
+                        { type: 'pointerDown', button: 0 },
+                        { type: 'pointerUp', button: 0 }] }],
+          });
+          await b.send('input.releaseActions', { context: ctx }).catch(() => {});
+          native = true;
+        } catch { native = false; }
+      }
+      if (!native) {
+        const ok = await b.evaluate(ctx, `(() => { const el = ${finder};
+          if (!el) return false; el.click(); return true; })()`).catch(() => false);
+        if (!ok) { console.error('ERR: no element matched', sel); process.exitCode = 1; break; }
+      }
       console.log('clicked:', sel, '| now:', await b.evaluate(ctx, 'location.href'));
       break;
     }
     case 'fill': {
       const ctx = await b.pick(flag('tab'));
       const [sel, val] = positional;
-      const ok = await b.evaluate(ctx,
-        `(() => { const el = document.querySelector(${JSON.stringify(sel)});
-           if (!el) return false;
-           el.focus(); el.value = ${JSON.stringify(val)};
-           el.dispatchEvent(new Event('input', {bubbles:true}));
-           el.dispatchEvent(new Event('change', {bubbles:true}));
-           ${has('enter') ? `el.form && el.form.requestSubmit && el.form.requestSubmit();` : ''}
-           return true; })()`);
-      if (!ok) { console.error('ERR: no element matched', sel); process.exit(1); }
-      console.log('filled:', sel);
+      let meta = null;
+      try {
+        meta = JSON.parse(await b.evaluate(ctx, `JSON.stringify((() => {
+          const el = document.querySelector(${JSON.stringify(sel)});
+          if (!el) return null;
+          el.focus();
+          const r = el.getBoundingClientRect();
+          return { vis: r.width > 0 && r.height > 0 };
+        })())`));
+      } catch { meta = null; }
+      if (!meta) { console.error('ERR: no element matched', sel); process.exitCode = 1; break; }
+      let native = false;
+      if (meta.vis) {
+        try {
+          // input.insertText is a trusted keystroke, not a synthetic value set.
+          await b.send('input.insertText', { context: ctx, text: String(val) });
+          native = true;
+        } catch { native = false; }
+      }
+      if (!native) {
+        const ok = await b.evaluate(ctx,
+          `(() => { const el = document.querySelector(${JSON.stringify(sel)});
+             if (!el) return false;
+             el.value = ${JSON.stringify(val)};
+             el.dispatchEvent(new Event('input', {bubbles:true}));
+             el.dispatchEvent(new Event('change', {bubbles:true}));
+             return true; })()`);
+        if (!ok) { console.error('ERR: no element matched', sel); process.exitCode = 1; break; }
+      }
+      if (has('enter')) {
+        await b.evaluate(ctx, `(() => { const el = document.querySelector(${JSON.stringify(sel)});
+          el.form && el.form.requestSubmit && el.form.requestSubmit(); return true; })()`).catch(() => {});
+      }
+      console.log('filled:', sel, native ? '(trusted input)' : '(synthetic fallback)');
       break;
     }
     // Same command, same shape as the Chromium backend.
