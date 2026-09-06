@@ -23,11 +23,12 @@ Implemented, tested and merged to `main`:
 | 4 · primitives | `select`, `hover`, `clear`, `doubleclick` (gated) | #11 |
 | 4 · extraction | `extract --schema` structured reads | #12 |
 | 4 · trusted input | Firefox trusted pointer clicks + native-first fill | #13 |
+| 4 · crawl | bounded same-host crawl (`crawl --from --max`) | #15 |
 
-Queued: **3 · persistent stdio driver**, 4 · bounded crawl, **5 ·
+Queued: **3 · persistent stdio driver**, **5 ·
 any-browser/OS** (discovery, Node launcher, identities), **6 · observability
 ledger**, **8 · WebDriver-classic reach**, then a release tag. Suites tracked
-on every merge: chromium 127 · launcher 30 · consent 31 · firefox 38 · mcp 11.
+on every merge: chromium 129 · launcher 30 · consent 31 · firefox 38 · mcp 11.
 
 ## The goal, in plain words
 
