@@ -397,7 +397,7 @@ try {
   ab('goto', url + 'interstitial', '--wait', 'calm');
   const calmMs = Date.now() - calmT0;
   check(`goto --wait calm settles instead of sleeping (${calmMs}ms)`,
-        calmMs < 2400 && calmMs >= 150, `${calmMs}ms`);
+        calmMs < 2400 && calmMs >= 300, `${calmMs}ms`);
   const calmEnv = execFileSync('node',
     [join(DIR, '..', 'gaze.mjs'), 'goto', url + 'passive'],
     { env: { ...process.env, GAZE_PORT: String(PORT), GAZE_STATE: state,

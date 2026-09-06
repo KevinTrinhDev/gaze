@@ -231,8 +231,10 @@ async function ariaOf(p) {
 // "super fast" for an agent that runs hundreds of steps. `--wait calm` (or
 // GAZE_WAIT=calm for a whole run) replaces the millisecond count with a real
 // settle: the page is calm when no responses have arrived for a quiet window
-// AND the DOM node count is stable AND readyState is complete. Worst case is
-// bounded by capMs, so calm mode is never slower than the sleep it replaces.
+// AND the DOM node count is stable AND readyState is complete. The cap is set
+// to roughly the fixed wait it replaces, so calm mode is bounded to about that
+// ceiling and typically much faster (measured ~400 ms when the page settles
+// early).
 async function calmPage(p, capMs) {
   const started = Date.now();
   let quiet = 0;
@@ -241,14 +243,21 @@ async function calmPage(p, capMs) {
   p.on('response', onResp);
   try {
     while (Date.now() - started < capMs) {
-      const n = await p.evaluate(() =>
-        document.readyState === 'complete' ? document.querySelectorAll('*').length : -1)
-        .catch(() => -1);
+      // Bound the evaluate itself: a wedged renderer (blocked script) must not
+      // hang the wait past its budget, so a sample that takes >200ms reads as
+      // "not calm" rather than stalling the loop.
+      const n = await Promise.race([
+        p.evaluate(() =>
+          document.readyState === 'complete' ? document.querySelectorAll('*').length : -1)
+          .catch(() => -1),
+        new Promise(res => { const t = setTimeout(() => { clearTimeout(t); res(-1); }, 200); t.unref?.(); }),
+      ]);
       if (n === -1) { quiet = 0; lastN = -1; }
       else if (n === lastN) quiet += 200;
       else { lastN = n; quiet = 0; }
-      if (Date.now() - started >= 250 && quiet >= 400) break;
-      await p.waitForTimeout(200);
+      if (quiet >= 400) break;
+      const left = capMs - (Date.now() - started);
+      if (left > 0) await p.waitForTimeout(Math.min(200, left));
     }
   } finally { p.off('response', onResp); }
 }
@@ -479,7 +488,7 @@ async function dispatch(ctx, argv) {
       await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
       {
         const w = flag('wait');
-        if (wantCalm(w)) await calmPage(p, 2000);
+        if (wantCalm(w)) await calmPage(p, 1500);
         else await p.waitForTimeout(wantMs(w, 1500));
       }
       // A page load wipes injected DOM, so put the badge back.
@@ -523,7 +532,7 @@ async function dispatch(ctx, argv) {
         () => clickEscalating(loc, Number(flag('timeout', 15000))));
       {
         const w = flag('wait');
-        if (wantCalm(w)) await calmPage(p, 1500);
+        if (wantCalm(w)) await calmPage(p, 1200);
         else await p.waitForTimeout(wantMs(w, 1200));
       }
       console.log(`clicked: ${sel}${how === 'selector' ? '' : ` (matched by ${how})`}` +
@@ -539,7 +548,7 @@ async function dispatch(ctx, argv) {
       if (has('enter')) {
         await p.keyboard.press('Enter');
         const w = flag('wait');
-        if (wantCalm(w)) await calmPage(p, 2500);
+        if (wantCalm(w)) await calmPage(p, 2000);
         else await p.waitForTimeout(wantMs(w, 2000));
       }
       console.log(`filled: ${sel}${how === 'selector' ? '' : ` (matched by ${how})`}`);
@@ -550,7 +559,7 @@ async function dispatch(ctx, argv) {
       await p.keyboard.press(positional[0]);
       {
         const w = flag('wait');
-        if (wantCalm(w)) await calmPage(p, 1500);
+        if (wantCalm(w)) await calmPage(p, 1000);
         else await p.waitForTimeout(wantMs(w, 1000));
       }
       console.log('pressed:', positional[0]);
