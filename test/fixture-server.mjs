@@ -12,6 +12,8 @@ const PAGE = `<!doctype html><title>fixture</title>
   <input name="email" placeholder="Email address">
   <input name="password" type="password" placeholder="Password">
   <button id="signin">Sign in</button>
+  <button id="click-me" style="width:100px;height:24px">Click probe</button>
+  <div id="click-count">0</div>
   <input type="file" id="upload" name="attachment">
   <select id="pick">
     <option value="a">Option A</option>
@@ -45,6 +47,14 @@ const PAGE = `<!doctype html><title>fixture</title>
   document.getElementById('double-me').addEventListener('dblclick', () => {
     const c = document.getElementById('double-count');
     c.textContent = String(Number(c.textContent) + 1);
+  });
+  // Only counts TRUSTED clicks: a synthetic el.click() must not register, so
+  // the Firefox trusted-input test proves which path actually ran.
+  document.getElementById('click-me').addEventListener('click', e => {
+    if (e.isTrusted) {
+      const c = document.getElementById('click-count');
+      c.textContent = String(Number(c.textContent) + 1);
+    }
   });
 </script>`;
 const FRAME = `<!doctype html><button id="frame-btn" style="width:80px;height:20px">Frame action</button>`;
