@@ -24,11 +24,13 @@ Implemented, tested and merged to `main`:
 | 4 · extraction | `extract --schema` structured reads | #12 |
 | 4 · trusted input | Firefox trusted pointer clicks + native-first fill | #13 |
 | 4 · crawl | bounded same-host crawl (`crawl --from --max`) | #15 |
+| 6 · observability | opt-in per-step trace ledger (`GAZE_TRACE=1`) | #16 |
+| 8 · WebDriver classic | experimental client scaffold (`webdriver.mjs`) | #17 |
 
-Queued: **3 · persistent stdio driver**, **5 ·
-any-browser/OS** (discovery, Node launcher, identities), **6 · observability
-ledger**, **8 · WebDriver-classic reach**, then a release tag. Suites tracked
-on every merge: chromium 129 · launcher 30 · consent 31 · firefox 38 · mcp 11.
+Queued: **3 · persistent stdio driver** and **5 ·
+any-browser/OS** (discovery, Node launcher, identities), then a release tag.
+Suites tracked on every merge: chromium 133 · launcher 30 · consent 31 ·
+firefox 38 · mcp 11 · webdriver 13.
 
 ## The goal, in plain words
 
