@@ -375,6 +375,8 @@ the exit-code contracts (0/1/2/3).
   short-list (WebMCP, Mozilla AAF, Webwright, Firefox DevTools MCP,
   `safaridriver --mcp`, Selenium Manager), market signals, wider competitive
   set, and any-browser implementation strategy.
+- `docs/ARCHITECTURE.md` — the reviewed technical blueprint (protocol engines,
+  session/profile strategy, launcher, consent/MCP pipeline, corrections list).
 - Chrome 136 remote-debugging change:
   https://developer.chrome.com/blog/remote-debugging-port · Chrome for Testing:
   https://developer.chrome.com/docs/automation-and-testing/chrome-for-testing

@@ -92,7 +92,8 @@ see [Roadmap](docs/ROADMAP.md).
 
 | | |
 |---|---|
-| [Usage](docs/USAGE.md) | every command and flag |
+| [USAGE.md](docs/USAGE.md) | every command and flag |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | the reviewed technical blueprint |
 | [GAUNTLET.md](docs/GAUNTLET.md) | the benchmark, level by level |
 | [COMPARISON.md](docs/COMPARISON.md) | vs Playwright MCP, browser-use, Skyvern, Claude in Chrome and more |
 | [SECURITY.md](docs/SECURITY.md) | threat model, consent, CAPTCHA and vault rules |
