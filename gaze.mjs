@@ -1206,6 +1206,32 @@ async function dispatch(ctx, argv) {
       break;
     }
 
+    // Structured extraction: one command, a JSON schema of name -> CSS
+    // selector, and one enveloped object back. Reads only.
+    case 'extract': {
+      const p = pick(ctx, flag('tab'));
+      const raw = flag('schema');
+      if (!raw) throw new Error('usage: gaze extract --schema \'{"name":"css-selector",...}\'');
+      let schema;
+      try { schema = JSON.parse(raw); }
+      catch { throw new Error('extract: --schema must be valid JSON (object of name -> selector)'); }
+      if (!schema || typeof schema !== 'object' || Array.isArray(schema))
+        throw new Error('extract: --schema must be an object of name -> selector');
+      const data = {};
+      for (const [name, sel] of Object.entries(schema)) {
+        let val = null;
+        try {
+          const loc = p.locator(sel).first();
+          await loc.waitFor({ state: 'attached', timeout: 3000 });
+          val = (await loc.innerText()).trim() || null;
+        } catch { val = null; }
+        data[name] = val;
+      }
+      const pretty = JSON.stringify(data, null, 2);
+      emit('extracted', p.url(), pretty, data, { json: has('json'), raw: has('raw') });
+      break;
+    }
+
     // Accessibility snapshot: the agent-facing read. Text-only, token-cheap
     // and deterministic, unlike a screenshot; the ecosystem default (see
     // docs/ROADMAP.md part 2). Output is page-derived, so it goes through the
@@ -1352,6 +1378,7 @@ const USAGE = `gaze <cmd>
   scrape <sel> [--attr a]       text (or an attribute) of every match
   links [--filter s] [--json]   every link on the page, deduped
   table [--nth N] [--json]      a table as rows
+  extract --schema '{"n":"sel"}' one enveloped object from many selectors
   console [--seconds N]         console output over a window [--reload]
   network [--seconds N]         responses over a window. --json-only finds
           [--json-only]         the JSON API a page already calls.
@@ -1396,7 +1423,7 @@ const argv = process.argv.slice(2);
 // Help must work when NO browser is running: connecting first turned `gaze --help`
 // into a raw CDP "ECONNREFUSED" stack. Resolve help and unknown commands here,
 // before attach() is ever called.
-const KNOWN_CMDS = new Set(['tabs', 'goto', 'text', 'html', 'snapshot', 'state', 'wait', 'map', 'shot', 'record', 'click', 'fill', 'press', 'select', 'hover', 'clear', 'doubleclick', 'scroll', 'eval', 'download', 'upload', 'indicator', 'scrape', 'links', 'table', 'console', 'network', 'session', 'challenge', 'wait-human', 'login', 'batch', 'stats', 'log', 'grant', 'revoke', 'grant-status']);
+const KNOWN_CMDS = new Set(['tabs', 'goto', 'text', 'html', 'snapshot', 'state', 'wait', 'extract', 'map', 'shot', 'record', 'click', 'fill', 'press', 'select', 'hover', 'clear', 'doubleclick', 'scroll', 'eval', 'download', 'upload', 'indicator', 'scrape', 'links', 'table', 'console', 'network', 'session', 'challenge', 'wait-human', 'login', 'batch', 'stats', 'log', 'grant', 'revoke', 'grant-status']);
 if (!argv.length || ['help', '--help', '-h'].includes(argv[0])) {
   console.log(USAGE);
   process.exit(0);
