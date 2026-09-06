@@ -105,6 +105,10 @@ gaze scroll down --px 800          # up | down | top | bottom
 gaze scroll to "#pricing"          # bring an element into view
 gaze upload "#attachment" ./report.pdf
 gaze download "a.download-link"
+gaze select "#country" US              # choose an option (value, else label)
+gaze hover "#row-7"                    # fire mouseover handlers
+gaze clear "input[name=email]"         # empty a field
+gaze doubleclick "#cell"               # double-click
 ```
 
 All of these are write actions, so they ask first. See **Consent** below.

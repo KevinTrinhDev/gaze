@@ -45,7 +45,8 @@ export const TICKETS = `${STATE}/tickets`;
 // all three are gated. `session list` is a read and stays ungated.
 export const WRITE_CMDS = new Set(['click', 'fill', 'press', 'download', 'eval',
                                    'login', 'upload', 'record', 'session',
-                                   'scroll']);
+                                   'scroll', 'select', 'hover', 'clear',
+                                   'doubleclick']);
 export const isWrite = a =>
   WRITE_CMDS.has(a[0]) && !(a[0] === 'session' && (a[1] || 'list') === 'list');
 
