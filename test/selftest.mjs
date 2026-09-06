@@ -408,6 +408,27 @@ try {
       encoding: 'utf8', timeout: 15000 });
   check('GAZE_WAIT=calm opts a whole run in', calmEnv.includes('URL:'));
 
+  // ---- interaction primitives (ROADMAP part 4) ----
+  ab('goto', url, '--wait', '300');
+  ab('select', '#pick', 'b');
+  check('select chooses an option by value',
+        JSON.parse(ab('eval', 'document.querySelector(\'#pick\').value')).includes('b'));
+  ab('select', '#pick', 'Option A');
+  check('select falls back to option label',
+        JSON.parse(ab('eval', 'document.querySelector(\'#pick\').value')).includes('a'));
+  ab('hover', '#signin');               // move the pointer away first: a
+  ab('hover', '#hover-me');             // re-hover from inside fires nothing
+  check('hover fires mouseover handlers',
+        JSON.parse(ab('eval',
+          'document.getElementById(\'hover-state\').textContent')).includes('hovered'));
+  ab('clear', 'input[name="email"]');
+  check('clear empties the field',
+        JSON.parse(ab('eval', 'document.querySelector(\'input[name="email"]\').value')).length === 0);
+  const dc0 = JSON.parse(ab('eval', 'Number(document.querySelector(\'#double-count\').textContent)'));
+  ab('doubleclick', '#double-me');
+  const dc1 = JSON.parse(ab('eval', 'Number(document.querySelector(\'#double-count\').textContent)'));
+  check('doubleclick fires dblclick handlers', dc1 === dc0 + 1, `was ${dc0}, now ${dc1}`);
+
   // ---- batch: many commands, ONE connection ----
   const script = join(DIR, 'batch.tmp');
   writeFileSync(script, ['tabs', 'text --max 40', 'scrape "nav a" --max 3'].join('\n'));
@@ -537,6 +558,10 @@ try {
   check('record is gated', gated('record', '--seconds', '1').code === 3);
   check('session load is gated', gated('session', 'load', 'selftest').code === 3);
   check('session list stays ungated', gated('session', 'list').code === 0);
+  check('select is gated', gated('select', '#pick', 'b').code === 3);
+  check('hover is gated', gated('hover', '#hover-me').code === 3);
+  check('clear is gated', gated('clear', 'input[name="email"]').code === 3);
+  check('doubleclick is gated', gated('doubleclick', '#double-me').code === 3);
 
   console.log(`${pass} passed, ${fail} failed`);
 } finally {

@@ -13,6 +13,14 @@ const PAGE = `<!doctype html><title>fixture</title>
   <input name="password" type="password" placeholder="Password">
   <button id="signin">Sign in</button>
   <input type="file" id="upload" name="attachment">
+  <select id="pick">
+    <option value="a">Option A</option>
+    <option value="b">Option B</option>
+  </select>
+  <button id="hover-me" style="width:110px;height:24px">Hover target</button>
+  <div id="hover-state">not hovered</div>
+  <button id="double-me" style="width:120px;height:24px">Double me</button>
+  <div id="double-count">0</div>
   <my-widget></my-widget>
   <iframe src="/frame" style="width:200px;height:60px"></iframe>
   <table>
@@ -30,6 +38,13 @@ const PAGE = `<!doctype html><title>fixture</title>
       this.attachShadow({ mode: 'open' }).innerHTML =
         '<button id="shadow-btn" style="width:80px;height:20px">Shadow action</button>';
     }
+  });
+  document.getElementById('hover-me').addEventListener('mouseover', () => {
+    document.getElementById('hover-state').textContent = 'hovered';
+  });
+  document.getElementById('double-me').addEventListener('dblclick', () => {
+    const c = document.getElementById('double-count');
+    c.textContent = String(Number(c.textContent) + 1);
   });
 </script>`;
 const FRAME = `<!doctype html><button id="frame-btn" style="width:80px;height:20px">Frame action</button>`;
