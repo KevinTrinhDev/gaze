@@ -240,8 +240,17 @@ gaze session list
 
 ```bash
 gaze challenge                # exits 2 if one is present
+gaze challenge --explain      # ... and name the verdict + advice
 gaze wait-human --timeout 300 # block until a person clears it
 ```
+
+`challenge` recognizes reCAPTCHA (v2/enterprise widget containers), hCaptcha,
+Cloudflare Turnstile and the Cloudflare interstitial, PerimeterX/HUMAN press-
+and-hold, DataDome, Arkose/FunCaptcha, Kasada, GeeTest and AWS WAF marker
+shapes, plus the wording of common challenge and block pages. A **block** is
+reported separately from a challenge: a challenge wants a human, a block wants
+you to stop. `--explain` says which verdict it found and what to do
+(`verdict: challenge|block|clean` plus signals and advice).
 
 **Nothing here solves a CAPTCHA, and nothing will.** Solver services are
 bot-detection evasion: they breach most sites' terms, and on a browser carrying

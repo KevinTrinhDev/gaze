@@ -114,7 +114,8 @@ const flag = (n, d) => { const i = rest.indexOf(`--${n}`); return i === -1 ? d :
 const has = n => rest.includes(`--${n}`);
 const positional = rest.filter((a, i) =>
   !a.startsWith('--') && !(i > 0 && rest[i - 1].startsWith('--') &&
-    !['headed', 'full', 'enter', 'new', 'nav', 'json', 'text', 'raw', 'yes'].includes(rest[i - 1].slice(2))))
+    !['headed', 'full', 'enter', 'new', 'nav', 'json', 'text', 'raw', 'yes', 'explain',
+      'submit', 'totp', 'reload', 'json-only'].includes(rest[i - 1].slice(2))))
   .concat(tail);
 
 // Shared with the Chromium backend in spirit: hide page chrome by default, walk
@@ -155,12 +156,26 @@ const MAP_JS = includeChrome => `(() => {
 
 const CHALLENGE_JS = `(() => {
   const marks = ['iframe[src*="recaptcha"]','iframe[src*="hcaptcha"]',
-    'iframe[src*="challenges.cloudflare.com"]','#challenge-form','.g-recaptcha',
-    '.h-captcha','[data-sitekey]'];
-  const found = marks.filter(m => document.querySelector(m));
+    'iframe[src*="challenges.cloudflare.com"]','iframe[src*="turnstile"]',
+    '#challenge-form','.g-recaptcha','.h-captcha','.cf-turnstile',
+    '#cf-challenge-running','.cf-browser-verification','#cf-please-wait',
+    '#px-captcha','.px-captcha-container','[id^="px-captcha"]',
+    '.datadome-captcha','#datadome-captcha',
+    'iframe[src*="captcha-delivery.com"]','iframe[src*="perimeterx"]',
+    'iframe[src*="funcaptcha"]','[id*="arkose"]','.ChallengeChallenge',
+    '[id*="kasada"]','script[src*="kasada"]',
+    '#geetest_holder','.geetest_panel',
+    '[id*="waf-captcha"]','[id^="awsWaf"]'];
+  const shown = el => !!el && (el.getClientRects().length > 0 || !!el.offsetParent);
+  const found = marks.filter(m => shown(document.querySelector(m)));
   const t = (document.body ? document.body.innerText : '').toLowerCase();
   const phrase = ['verify you are human','i am not a robot','checking your browser',
-    'complete the security check'].find(p => t.includes(p));
+    'complete the security check','just a moment','verifying you are human',
+    'needs to review the security of your connection',
+    'enable javascript and cookies to continue',
+    'press & hold','press and hold',
+    'funcaptcha','arkose','kasada','geetest','aws waf','slide to continue']
+    .find(p => t.includes(p));
   return JSON.stringify({ challenged: found.length > 0 || !!phrase, markers: found,
                           phrase: phrase || null });
 })()`;
@@ -346,7 +361,25 @@ try {
     case 'challenge': {
       const ctx = await b.pick(flag('tab'));
       const r = JSON.parse(await b.evaluate(ctx, CHALLENGE_JS));
-      if (has('json')) { console.log(JSON.stringify(r, null, 2)); break; }
+      const explain = has('explain');
+      if (has('json')) {
+        if (explain) {
+          const verdict = r.challenged ? 'challenge' : 'clean';
+          const advice = r.challenged
+            ? 'Solve it by hand in the visible window (gaze wait-human).'
+            : '';
+          console.log(JSON.stringify({ ...r, verdict, advice }, null, 2));
+        } else console.log(JSON.stringify(r, null, 2));
+        break;
+      }
+      if (explain) {
+        console.log('verdict:', r.challenged ? 'challenge' : 'clean');
+        const sig = [];
+        if (r.markers.length) sig.push('markers: ' + r.markers.join(', '));
+        if (r.phrase) sig.push('phrase: ' + r.phrase);
+        if (sig.length) console.log('  signals:', sig.join(' | '));
+        if (r.challenged) console.log('  advice: Solve it by hand in the visible window (gaze wait-human).');
+      }
       if (!r.challenged) { console.log('no challenge detected'); break; }
       console.log('CHALLENGE DETECTED on', await b.evaluate(ctx, 'location.href'));
       if (r.markers.length) console.log('  markers:', r.markers.join(', '));

@@ -84,6 +84,21 @@ const BLOCKED = `<!doctype html><title>blocked</title>
 const PASSIVE = `<!doctype html><title>shop</title>
 <div data-sitekey="6Lc-v3-passive-score"></div>
 <p>Add to basket</p>`;
+// Challenge fixtures for vendors that were previously undetected (ROADMAP
+// part 7). Best-effort marker shapes, not real vendor pages.
+const ARKOSE = `<!doctype html><title>fun challenge</title>
+<iframe src="/f-funcaptcha-arkose" style="width:300px;height:200px"></iframe>
+<p>Complete the security check to access this page.</p>`;
+const KASADA = `<!doctype html><title>checking</title>
+<script src="/kasada-check.js"></script>
+<div id="kasada-check" style="width:10px;height:10px"></div>
+<p>Verifying your request with Kasada.</p>`;
+const GEETEST = `<!doctype html><title>slide</title>
+<div id="geetest_holder" style="width:300px;height:80px"></div>
+<p>Complete the slide to continue.</p>`;
+const AWSWAF = `<!doctype html><title>aws waf</title>
+<div id="aws-waf-captcha" style="width:300px;height:120px"></div>
+<p>Complete the AWS WAF captcha check.</p>`;
 
 createServer((req, res) => {
   // The JSON route goes FIRST: it sets its own content-type, and calling
@@ -95,6 +110,10 @@ createServer((req, res) => {
   res.writeHead(200, { 'content-type': 'text/html' });
   if (req.url === '/frame') return res.end(FRAME);
   if (req.url === '/challenged') return res.end(CHALLENGED);
+  if (req.url === '/arkose') return res.end(ARKOSE);
+  if (req.url === '/kasada') return res.end(KASADA);
+  if (req.url === '/geetest') return res.end(GEETEST);
+  if (req.url === '/waf') return res.end(AWSWAF);
   if (req.url === '/interstitial') return res.end(INTERSTITIAL);
   if (req.url === '/passive') return res.end(PASSIVE);
   if (req.url === '/presshold') return res.end(PRESSHOLD);
