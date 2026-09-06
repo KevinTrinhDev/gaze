@@ -19,12 +19,15 @@ Implemented, tested and merged to `main`:
 | Test infra | `GAZE_DRIVER` pin for the self-test | #6 |
 | 1 · speed & perception | `snapshot`, `state` fingerprint, `wait`, `--wait calm`/`GAZE_WAIT=calm` | #7 |
 | 7 · challenge depth | Arkose/Kasada/GeeTest/AWS-WAF markers + `challenge --explain` | #8 |
+| 4 · Firefox parity | `snapshot`/`state`/`wait` on BiDi + a session-leak bugfix | #10 |
+| 4 · primitives | `select`, `hover`, `clear`, `doubleclick` (gated) | #11 |
+| 4 · extraction | `extract --schema` structured reads | #12 |
+| 4 · trusted input | Firefox trusted pointer clicks + native-first fill | #13 |
 
-In review/implementation: **3 · persistent stdio driver** and **4 · Firefox
-perception parity** (snapshot/state/wait on BiDi). Queued: the rest of part 4
-(extract, bounded crawl, missing primitives, Firefox trusted input), **5 ·
+Queued: **3 · persistent stdio driver**, 4 · bounded crawl, **5 ·
 any-browser/OS** (discovery, Node launcher, identities), **6 · observability
-ledger**, **8 · WebDriver-classic reach**, then a release tag.
+ledger**, **8 · WebDriver-classic reach**, then a release tag. Suites tracked
+on every merge: chromium 127 · launcher 30 · consent 31 · firefox 38 · mcp 11.
 
 ## The goal, in plain words
 
