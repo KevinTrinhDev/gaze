@@ -215,6 +215,18 @@ async function withRetry(fn, label) {
   }
 }
 
+async function ariaOf(p) {
+  // <body>'s accessibility snapshot with a hard timeout. The timer MUST be
+  // cleared on success: an uncleared timeout keeps the process alive for its
+  // full duration after the command already printed its answer.
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('aria snapshot timed out')), 15000);
+    p.locator('body').ariaSnapshot().then(
+      r => { clearTimeout(t); resolve(r); },
+      e => { clearTimeout(t); reject(e); });
+  });
+}
+
 // Compact interactive-element map. Hides page chrome by default so main content
 // is not crowded out, walks open shadow roots, emits a reusable selector.
 const collect = (includeChrome) => {
@@ -367,7 +379,11 @@ function logLine(cmd, argv, host, ms, ok, err) {
         // the query string, and this log persists. Keep origin and path, which
         // is what makes the log useful, and drop the rest.
         ? argv.slice(1).map(a => (a.startsWith('--') ? a : stripQuery(a)))
-        : argv.slice(1);
+        // `wait`'s needle can be a full signed URL too. The flags are kept so
+        // the log still says what kind of wait it was; the needle does not.
+        : cmd === 'wait'
+          ? argv.slice(1).map(a => (a.startsWith('--') ? a : '<redacted>'))
+          : argv.slice(1);
     appendFileSync(LOG_FILE, JSON.stringify({
       ts: new Date().toISOString(), cmd, args, host, ms, ok,
       ...(err ? { err: String(err).slice(0, 200) } : {}),
@@ -1021,6 +1037,101 @@ async function dispatch(ctx, argv) {
       break;
     }
 
+    // Accessibility snapshot: the agent-facing read. Text-only, token-cheap
+    // and deterministic, unlike a screenshot; the ecosystem default (see
+    // docs/ROADMAP.md part 2). Output is page-derived, so it goes through the
+    // same untrusted envelope as text/html.
+    case 'snapshot': {
+      const p = pick(ctx, flag('tab'));
+      const n = Number(flag('max', 6000));
+      let snap;
+      try { snap = await ariaOf(p); }
+      catch (e) {
+        // A timeout is one thing; a closed page or an unsupported driver is
+        // another. Swallowing them into a generic message hides the cause.
+        if (/timed out/i.test(e.message)) throw new Error('accessibility snapshot timed out');
+        throw e;
+      }
+      if (!snap) throw new Error('no accessibility snapshot available for this page');
+      const s = snap.slice(0, n);
+      emit('a11y snapshot', p.url(), s, s, { json: has('json'), raw: has('raw') });
+      break;
+    }
+
+    // A one-call perception primitive: page identity plus a fingerprint of its
+    // accessibility tree, so a caller can detect "did the page change" without
+    // re-reading pixels or re-serializing the DOM. Reads only.
+    case 'state': {
+      const p = pick(ctx, flag('tab'));
+      const n = Number(flag('max', 2500));
+      let snap = '';
+      try { snap = await ariaOf(p); } catch { snap = ''; }
+      const meta = await p.evaluate(() => ({
+        url: location.href, title: document.title,
+        ready: document.readyState, scrollY: Math.round(window.scrollY || 0),
+      }));
+      const { createHash } = await import('node:crypto');
+      const fingerprint = createHash('sha256')
+        .update(meta.url + '\n' + meta.title + '\n' + snap).digest('hex');
+      const data = {
+        url: meta.url, title: meta.title, ready: meta.ready,
+        scrollY: meta.scrollY, fingerprint,
+        snapshot: snap.slice(0, n),
+      };
+      emit('page state', data.url,
+           `url: ${data.url}\ntitle: ${data.title}\nready: ${data.ready}\n` +
+           `fingerprint: ${data.fingerprint}`,
+           data, { json: has('json'), raw: has('raw') });
+      break;
+    }
+
+    // Wait for a condition instead of sleeping a fixed time. Read-only: it
+    // never changes anything, it just stops when a selector/url/text exists or
+    // the network goes quiet. `wait --for url` is the cheap way an agent
+    // follows a navigation that a click started.
+    case 'wait': {
+      const p = pick(ctx, flag('tab'));
+      const forWhat = (flag('for', 'selector') || 'selector').toLowerCase();
+      const needle = positional[0] || '';
+      const limit = Math.min(Math.max(Number(flag('timeout', 30)), 1), 300) * 1000;
+      // network-idle needs no needle: it waits for a quiet window instead.
+      if ((forWhat !== 'network-idle' && !needle) ||
+          !['selector', 'url', 'text', 'network-idle'].includes(forWhat))
+        throw new Error('usage: gaze wait --for selector|url|text|network-idle [<needle>] [--timeout s]');
+      const started = Date.now();
+      let ok = false;
+      let closed = false;
+      let quietMs = 0;
+      const onResp = () => { quietMs = 0; };
+      if (forWhat === 'network-idle') p.on('response', onResp);
+      while (Date.now() - started < limit) {
+        if (forWhat === 'url') {
+          ok = p.url().includes(needle);
+        } else if (forWhat === 'text') {
+          ok = await p.evaluate(t => (document.body?.innerText || '').includes(t), needle).catch(() => false);
+        } else if (forWhat === 'network-idle') {
+          quietMs += 200; ok = quietMs >= 600;
+        } else {
+          ok = await p.evaluate(s => !!document.querySelector(s), needle).catch(() => false);
+        }
+        if (ok) break;
+        // A closed tab should error promptly, not spin to --timeout.
+        if (p.isClosed()) { closed = true; break; }
+        await p.waitForTimeout(200);
+      }
+      if (forWhat === 'network-idle') p.off('response', onResp);
+      if (!ok) {
+        console.error(closed
+          ? 'ERR: page closed while waiting'
+          : `ERR: never ${forWhat} '${needle}' within ${limit / 1000}s`);
+        process.exitCode = 1;
+        break;
+      }
+      const waited = Math.round((Date.now() - started) / 100) / 10;
+      console.log(`waited ${waited}s for ${forWhat}${needle ? ` '${needle}'` : ''}`);
+      break;
+    }
+
     default:
       console.log(USAGE);
   }
@@ -1044,6 +1155,8 @@ const USAGE = `gaze <cmd>
   goto <url> [--new] [--tab N]  navigate
   text [--max N]                page text
   html [--max N]                page html
+  snapshot [--max N] [--json]   accessibility (ARIA) snapshot, the agent read
+  state [--max N] [--json]      url/title + content fingerprint + snapshot
   map [--nav] [--filter s]      clickable/fillable elements, each with a
       [--max N] [--json]        selector. Hides nav/header/footer by default.
   shot [--out f] [--full]       screenshot
@@ -1055,6 +1168,8 @@ const USAGE = `gaze <cmd>
   press <Key>                   keyboard press
   scroll up|down|top|bottom     scroll the page [--px N]
   scroll to <sel>               scroll an element into view
+  wait --for sel|url|text|idle [<needle>]  wait for a condition instead of
+         [--timeout s]          sleeping (read-only; idle needs no needle)
   eval "<js>"                   run JS in page
   download <sel>                click and save the download
   upload <sel> <file...>        attach local file(s) to a file input
@@ -1095,7 +1210,7 @@ const USAGE = `gaze <cmd>
   batch asks ONCE for the whole script
 
  untrusted output
-  text/html/scrape/links/table are wrapped and injection-scanned
+  text/html/scrape/links/table/snapshot/state are wrapped and injection-scanned
   --raw                         bare output, no envelope`;
 
 // -------------------------------------------------------------------- main --
@@ -1104,7 +1219,7 @@ const argv = process.argv.slice(2);
 // Help must work when NO browser is running: connecting first turned `gaze --help`
 // into a raw CDP "ECONNREFUSED" stack. Resolve help and unknown commands here,
 // before attach() is ever called.
-const KNOWN_CMDS = new Set(['tabs', 'goto', 'text', 'html', 'map', 'shot', 'record', 'click', 'fill', 'press', 'scroll', 'eval', 'download', 'upload', 'indicator', 'scrape', 'links', 'table', 'console', 'network', 'session', 'challenge', 'wait-human', 'login', 'batch', 'stats', 'log', 'grant', 'revoke', 'grant-status']);
+const KNOWN_CMDS = new Set(['tabs', 'goto', 'text', 'html', 'snapshot', 'state', 'wait', 'map', 'shot', 'record', 'click', 'fill', 'press', 'scroll', 'eval', 'download', 'upload', 'indicator', 'scrape', 'links', 'table', 'console', 'network', 'session', 'challenge', 'wait-human', 'login', 'batch', 'stats', 'log', 'grant', 'revoke', 'grant-status']);
 if (!argv.length || ['help', '--help', '-h'].includes(argv[0])) {
   console.log(USAGE);
   process.exit(0);

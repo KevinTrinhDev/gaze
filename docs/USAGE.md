@@ -25,6 +25,27 @@ gaze map --json --max 500
 All page output is wrapped in an untrusted envelope and scanned for prompt
 injection. Pass `--raw` for bare output.
 
+The agent-facing way to *see* a page is the accessibility snapshot — text only,
+no pixels, no vision model:
+
+```bash
+gaze snapshot --json        # ARIA tree: buttons, fields, links, roles
+gaze state --json --raw     # url/title + sha256 fingerprint + bounded snapshot
+```
+
+`state` hashes the snapshot, so a caller can detect "did the page change"
+without re-reading it. Waiting for a change instead of sleeping a fixed time:
+
+```bash
+gaze click "#refresh" --yes
+gaze wait --for url updated --timeout 30    # after a click that navigates
+gaze wait --for selector ".loaded"
+gaze wait --for text "Complete"
+gaze wait --for network-idle x --timeout 20 # 600ms with no responses
+```
+
+All three are reads and never prompt.
+
 ## Extracting data
 
 ```bash
