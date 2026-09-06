@@ -429,6 +429,14 @@ try {
   const dc1 = JSON.parse(ab('eval', 'Number(document.querySelector(\'#double-count\').textContent)'));
   check('doubleclick fires dblclick handlers', dc1 === dc0 + 1, `was ${dc0}, now ${dc1}`);
 
+  // ---- structured extraction (ROADMAP part 4) ----
+  const ex = JSON.parse(ab('extract', '--schema',
+    '{"widget":"table tr:nth-child(2) td:first-child","qty":"table tr:nth-child(2) td:nth-child(2)","head":"table tr:first-child th:first-child","missing":"#nope"}',
+    '--json'));
+  check('extract returns enveloped structured data', ex._untrusted === true && ex.kind === 'extracted');
+  check('extract fills every selector', ex.data.widget === 'widget' && ex.data.qty === '3' && ex.data.head === 'Name', JSON.stringify(ex.data));
+  check('extract reports missing selectors as null', ex.data.missing === null);
+
   // ---- batch: many commands, ONE connection ----
   const script = join(DIR, 'batch.tmp');
   writeFileSync(script, ['tabs', 'text --max 40', 'scrape "nav a" --max 3'].join('\n'));
