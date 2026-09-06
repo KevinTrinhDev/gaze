@@ -297,8 +297,11 @@ gaze log --n 20        # raw recent entries
 ```
 
 Local JSONL, mode 600, nothing leaves the machine, `GAZE_LOG=off` disables it.
-**Values are redacted**: `fill` values, `eval` scripts and `login` arguments
-never reach the log, because a log that quietly accumulates passwords is worse
+Set `GAZE_TRACE=1` to also write a per-step trace ledger (`trace.jsonl`, mode
+600): every command records the page URL and a content fingerprint **before
+and after** it ran, so "what the agent did" replays as a change trail with no
+video. Trace rows store the command shape only — never values.
+**Values are redacted**: `fill` values, `eval` scripts and `login` argumentsnever reach the log, because a log that quietly accumulates passwords is worse
 than no log. `goto` URLs keep their origin and path but have their query string,
 fragment and any userinfo stripped, since that is where magic-link tokens,
 OAuth codes and signed-URL signatures live. A secret embedded in the path
@@ -317,6 +320,7 @@ nothing. Use `GAZE_LOG=off` for a run where even that matters.
 | `GAZE_STATE` | keep the log, sessions and standing grant somewhere else (default `~/.local/share/gaze`) |
 | `GAZE_YES` | `1` pre-approves writes without putting consent in argv |
 | `GAZE_LOG` | `off` disables activity logging |
+| `GAZE_TRACE` | `1` writes a per-step fingerprint trace to `trace.jsonl` |
 | `GAZE_HEADLESS` | start without a visible window |
 
 ## Exit codes

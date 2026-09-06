@@ -238,6 +238,19 @@ async function ariaOf(p) {
   });
 }
 
+// A short content fingerprint (url + a11y snapshot, 16 hex chars) used by the
+// GAZE_TRACE=1 ledger to detect "did this step change the page". ariaOf has a
+// self-clearing timeout, so no timer lingers after a traced step.
+async function pageFp(p) {
+  try {
+    const url = p.url();
+    let snap = '';
+    try { snap = await ariaOf(p); } catch { snap = ''; }
+    const { createHash } = await import('node:crypto');
+    return { url, fp: createHash('sha256').update(url + '\n' + snap).digest('hex').slice(0, 16) };
+  } catch { return null; }
+}
+
 // Fixed sleeps after goto/click are the difference between "responsive" and
 // "super fast" for an agent that runs hundreds of steps. `--wait calm` (or
 // GAZE_WAIT=calm for a whole run) replaces the millisecond count with a real
@@ -422,6 +435,13 @@ function injectBadge(label) {
 
 const LOG_FILE = `${STATE}/log.jsonl`;
 const LOG_ON = (process.env.GAZE_LOG || 'on') !== 'off';
+
+// Opt-in per-step trace ledger (ROADMAP part 6): GAZE_TRACE=1 records, per
+// command, the page URL and a content fingerprint BEFORE and AFTER the command
+// ran, so "what the agent did" can be replayed as a change trail without
+// video. Never stores command values (see the redaction rules in logLine).
+const TRACE_ON = process.env.GAZE_TRACE === '1';
+const TRACE_FILE = `${STATE}/trace.jsonl`;
 
 // A local, append-only record of what ran, how long it took and what failed.
 // Local file only, mode 600, nothing leaves the machine.
@@ -1564,14 +1584,41 @@ try {
   ({ b, ctx } = await attach());
   const preApprovedRun = preApproved(argv);
   const where = () => { try { return pick(ctx).url(); } catch { return '(no open tab)'; } };
+  // Per-step trace ledger row (GAZE_TRACE=1). Never stores command values;
+  // only the shape (cmd/host/timing/ok) and before/after page fingerprints.
+  const traceStep = (cmd, host, ms, ok, pre, post) => {
+    if (!TRACE_ON) return;
+    try {
+      mkdirSync(STATE, { recursive: true });
+      appendFileSync(TRACE_FILE, JSON.stringify({
+        ts: new Date().toISOString(), cmd, host, ms, ok,
+        urlBefore: pre?.url ?? null, urlAfter: post?.url ?? null,
+        fpBefore: pre?.fp ?? null, fpAfter: post?.fp ?? null,
+        changed: pre && post ? (pre.url !== post.url || pre.fp !== post.fp) : null,
+      }) + '\n');
+      chmodSync(TRACE_FILE, 0o600);
+    } catch { /* a trace must never break the command */ }
+  };
+
   // Every command is timed and recorded so `gaze stats` can show what is slow
   // and what keeps failing. Logging never changes behaviour or swallows an error.
   const timed = async (args) => {
     const t0 = Date.now();
     let ok = true, err = null;
+    let pre = null, post = null;
+    if (TRACE_ON) {
+      try { const p = pick(ctx); pre = await pageFp(p); } catch { pre = null; }
+    }
     try { await dispatch(ctx, args); if (process.exitCode) { ok = false; err = `exit ${process.exitCode}`; } }
     catch (e) { ok = false; err = e.message; throw e; }
-    finally { logLine(args[0], args, hostOf(where()), Date.now() - t0, ok, err); }
+    finally {
+      if (TRACE_ON) {
+        try { const p = pick(ctx); post = await pageFp(p); } catch { post = null; }
+      }
+      const host = hostOf(where());
+      logLine(args[0], args, host, Date.now() - t0, ok, err);
+      traceStep(args[0], host, Date.now() - t0, ok, pre, post);
+    }
   };
 
   if (argv[0] === 'batch') {

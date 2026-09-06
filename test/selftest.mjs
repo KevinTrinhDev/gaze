@@ -446,6 +446,25 @@ try {
         crawl.data.every(r => String(r.url).includes('127.0.0.1') && r.title === 'fixture'),
         JSON.stringify(crawl.data).slice(0, 300));
 
+  // ---- trace ledger (ROADMAP part 6) ----
+  const { readFileSync } = await import('node:fs');
+  const trEnv = { ...process.env, GAZE_PORT: String(PORT), GAZE_STATE: state,
+                  GAZE_APPROVAL: 'off', GAZE_TRACE: '1' };
+  const tr = (...a) => execFileSync('node', [join(DIR, '..', 'gaze.mjs'), ...a],
+    { env: trEnv, encoding: 'utf8' });
+  tr('goto', url, '--wait', '100');
+  tr('click', '#signin', '--yes');
+  tr('fill', 'input[name="email"]', 'trace-secret-7');
+  const traceTxt = readFileSync(`${state}/trace.jsonl`, 'utf8');
+  const tRows = traceTxt.trim().split('\n').filter(Boolean).map(l => JSON.parse(l));
+  check('trace ledger records traced steps', tRows.length >= 3, `${tRows.length} rows`);
+  check('trace steps carry before/after fingerprints',
+        tRows.every(r => r.urlBefore && r.fpBefore && r.urlAfter && r.fpAfter));
+  check('trace flags a navigating step as changed',
+        tRows[0].changed === true || tRows[0].urlBefore !== tRows[0].urlAfter,
+        JSON.stringify(tRows[0]));
+  check('trace never logs command values', !traceTxt.includes('trace-secret-7'));
+
   // ---- batch: many commands, ONE connection ----
   const script = join(DIR, 'batch.tmp');
   writeFileSync(script, ['tabs', 'text --max 40', 'scrape "nav a" --max 3'].join('\n'));
