@@ -340,6 +340,13 @@ const CHALLENGE = () => {
     '#px-captcha', '.px-captcha-container', '[id^="px-captcha"]',
     '.datadome-captcha', '#datadome-captcha',
     'iframe[src*="captcha-delivery.com"]', 'iframe[src*="perimeterx"]',
+    // Vendors added in ROADMAP part 7. Best-effort marker shapes, verified
+    // against each site when a real miss shows up; the pattern list grows by
+    // evidence, not by guesswork.
+    'iframe[src*="funcaptcha"]', '[id*="arkose"]', '.ChallengeChallenge',
+    '[id*="kasada"]', 'script[src*="kasada"]',
+    '#geetest_holder', '.geetest_panel',
+    '[id*="waf-captcha"]', '[id^="awsWaf"]',
   ];
   // A marker that is not rendered is a leftover, not a live challenge: sites
   // keep the widget container in the DOM after it has already been solved.
@@ -352,7 +359,10 @@ const CHALLENGE = () => {
                   'needs to review the security of your connection',
                   'enable javascript and cookies to continue',
                   // PerimeterX's press-and-hold, which carries no captcha widget.
-                  'press & hold', 'press and hold'].find(p => t.includes(p));
+                  'press & hold', 'press and hold',
+                  // Vendor phrases (Arkose/FunCaptcha, Kasada, GeeTest, AWS WAF).
+                  'funcaptcha', 'arkose', 'kasada', 'geetest', 'aws waf',
+                  'slide to continue'].find(p => t.includes(p));
   // A hard block is not a challenge -- there is nothing to solve -- but it is
   // the other way a page can be worthless while looking like content. Scraping
   // on through one is how an operator's real IP earns a longer ban.
@@ -793,7 +803,30 @@ async function dispatch(ctx, argv) {
     case 'challenge': {
       const p = pick(ctx, flag('tab'));
       const r = await p.evaluate(CHALLENGE);
-      if (has('json')) { console.log(JSON.stringify(r, null, 2)); break; }
+      // --explain names the verdict and the advice. A block and a challenge
+      // need opposite answers, so the tool says which one it found.
+      const explain = has('explain');
+      let verdict = 'clean';
+      let advice = '';
+      if (r.blocked && !r.challenged) {
+        verdict = 'block';
+        advice = 'There is nothing to solve. Stop hitting this host: the address doing it is the operator\'s own.';
+      } else if (r.challenged) {
+        verdict = 'challenge';
+        advice = 'Solve it by hand in the visible window (gaze wait-human), or for unattended low-risk work consider a per-domain opt-in auto-solve (docs/ROADMAP.md part 7).';
+      }
+      if (has('json')) {
+        console.log(JSON.stringify(explain ? { ...r, verdict, advice } : r, null, 2));
+        break;
+      }
+      if (explain) {
+        console.log('verdict:', verdict);
+        const sig = [];
+        if (r.markers.length) sig.push('markers: ' + r.markers.join(', '));
+        if (r.phrase) sig.push('phrase: ' + r.phrase);
+        if (sig.length) console.log('  signals:', sig.join(' | '));
+        if (advice) console.log('  advice:', advice);
+      }
       // A block is reported separately from a challenge, because the answer is
       // the opposite: a challenge wants a human, a block wants you to stop.
       if (!r.challenged && r.blocked) {
@@ -1260,7 +1293,8 @@ const USAGE = `gaze <cmd>
   session save|load|list [name] snapshot / restore cookies (mode 600)
 
  challenges
-  challenge [--json]            detect a CAPTCHA (exit 2 if present)
+  challenge [--json] [--explain] detect a CAPTCHA (exit 2 if present);
+                                 --explain names the verdict and advice
   wait-human [--timeout s]      pause until a human clears it
 
  credentials

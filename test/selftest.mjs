@@ -462,6 +462,30 @@ try {
         blOut.includes('BLOCKED') && !blOut.includes('CHALLENGE DETECTED') && blCode === 2,
         blOut.trim().split('\n')[0]);
 
+  // Vendors that previously went undetected (ROADMAP part 7): Arkose/FunCaptcha,
+  // Kasada, GeeTest and AWS WAF each get a fixture page with a marker element.
+  for (const [path, marker] of [['arkose', 'funcaptcha'], ['kasada', 'kasada'],
+                                ['geetest', 'geetest'], ['waf', 'waf-captcha']]) {
+    ab('goto', url + path, '--wait', '300');
+    let o = '', c = 0;
+    try { o = ab('challenge'); } catch (e) { o = (e.stdout || '') + (e.stderr || ''); c = e.status; }
+    check(`challenge detects ${marker}`, o.includes('CHALLENGE DETECTED') && c === 2,
+          `/${path} exit ${c}`);
+  }
+  // --explain names the verdict and the advice; a block and a challenge need
+  // opposite answers, and the caller should be told which one it is.
+  ab('goto', url + 'challenged', '--wait', '300');
+  let exO = '', exC = 0;
+  try { exO = ab('challenge', '--explain'); }
+  catch (e) { exO = (e.stdout || '') + (e.stderr || ''); exC = e.status; }
+  check('challenge --explain names the verdict',
+        exC === 2 && /verdict: challenge/.test(exO) && /advice:/.test(exO),
+        exO.split('\n').slice(0, 2).join(' '));
+  const exJ = JSON.parse(ab('challenge', '--json', '--explain'));
+  check('challenge --json --explain carries the verdict', exJ.verdict === 'challenge');
+  check('challenge --json without --explain stays schema-stable',
+        !('verdict' in JSON.parse(ab('challenge', '--json'))));
+
   // ---- regressions: failures found by stress-testing the real browser -------
   // Each of these was a real defect. They stay here so they cannot come back.
 
