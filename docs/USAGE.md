@@ -25,6 +25,27 @@ gaze map --json --max 500
 All page output is wrapped in an untrusted envelope and scanned for prompt
 injection. Pass `--raw` for bare output.
 
+The agent-facing way to *see* a page is the accessibility snapshot — text only,
+no pixels, no vision model:
+
+```bash
+gaze snapshot --json        # ARIA tree: buttons, fields, links, roles
+gaze state --json --raw     # url/title + sha256 fingerprint + bounded snapshot
+```
+
+`state` hashes the snapshot, so a caller can detect "did the page change"
+without re-reading it. Waiting for a change instead of sleeping a fixed time:
+
+```bash
+gaze click "#refresh" --yes
+gaze wait --for url updated --timeout 30    # after a click that navigates
+gaze wait --for selector ".loaded"
+gaze wait --for text "Complete"
+gaze wait --for network-idle x --timeout 20 # 600ms with no responses
+```
+
+All three are reads and never prompt.
+
 ## Extracting data
 
 ```bash
@@ -163,6 +184,28 @@ widens with length.
 printf 'goto https://example.com\nmap --json\nscrape h1\n' | gaze batch -
 gaze batch script.txt
 ```
+
+Fixed post-action sleeps are the difference between responsive and fast when an
+agent runs hundreds of steps. `goto`, `click`, `fill --enter` and `press`
+accept `--wait calm`, which settles on real page quiet — no responses for a
+window, DOM node count stable, `readyState` complete — instead of sleeping a
+fixed number of milliseconds. Calm mode is capped at about the fixed wait it
+replaces (goto 1500 ms, click 1200 ms, fill --enter 2000 ms, press 1000 ms), so
+it is bounded to roughly that ceiling and typically much faster (~400 ms
+measured when the page settles early):
+
+```bash
+gaze click "#signin" --yes --wait calm
+export GAZE_WAIT=calm      # the whole run, including batch
+```
+
+A numeric `--wait` (e.g. `--wait 2000`) keeps the old predictable behaviour;
+numeric `GAZE_WAIT=2000` sets that default for a whole run. Calm mode applies
+to `goto`/`click`/`fill --enter`/`press`; `scroll` and other commands keep
+their fixed waits. The heuristic reads three signals (network quiet, DOM
+node-count stability, readyState); in-place text/style mutation without a
+node-count change, or requests scheduled after the quiet window, can read as
+calm.
 
 ## Credentials
 

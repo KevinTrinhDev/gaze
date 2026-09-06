@@ -30,7 +30,12 @@ export const NOTE =
 
 export function emit(kind, url, text, data, { json, raw }) {
   if (raw) { console.log(json ? JSON.stringify(data, null, 2) : text); return; }
-  const suspicious = sniff(text);
+  // `state` carries the page snapshot in data.snapshot while its human text is
+  // a short summary. Sniff the snapshot too, so `state --json` flags exactly
+  // what `snapshot` would flag instead of silently passing it through.
+  const extra = (typeof data?.snapshot === 'string' && data.snapshot !== text)
+    ? '\n' + data.snapshot : '';
+  const suspicious = sniff(text + extra);
   if (json) {
     console.log(JSON.stringify({
       _untrusted: true, _note: NOTE,

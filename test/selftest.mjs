@@ -369,6 +369,45 @@ try {
         fillEntries.length > 0 && fillEntries.every(l => !l.includes('@example.test')),
         `${fillEntries.length} fill entries`);
 
+  // ---- perception: snapshot, state, wait (ROADMAP part 2) ----
+  ab('goto', url, '--wait', '400');
+  const snap = JSON.parse(ab('snapshot', '--json', '--max', '4000'));
+  check('snapshot returns an enveloped a11y tree',
+        snap._untrusted === true && snap.kind === 'a11y snapshot'
+        && String(snap.data).length > 50, `snapshot ${String(snap.data).length} chars`);
+  const state1 = JSON.parse(ab('state', '--json', '--raw'));
+  const state2 = JSON.parse(ab('state', '--json', '--raw'));
+  check('state reports the real url', String(state1.url).includes('127.0.0.1'));
+  check('state fingerprint is sha256', /^[0-9a-f]{64}$/.test(state1.fingerprint));
+  check('state fingerprint is stable for an unchanged page',
+        state1.fingerprint === state2.fingerprint);
+  const hostProbe = new URL(url).host;
+  const waitUrl = ab('wait', '--for', 'url', hostProbe, '--timeout', '5');
+  check('wait --for url returns when satisfied', /waited .* for url/.test(waitUrl), waitUrl.trim());
+  const waitSel = ab('wait', '--for', 'selector', 'input', '--timeout', '5');
+  check('wait --for selector returns when satisfied', /waited .* for selector/.test(waitSel), waitSel.trim());
+  let waitOut = '', waitCode = 0;
+  try { ab('wait', '--for', 'selector', '#definitely-not-here', '--timeout', '1'); }
+  catch (e) { waitOut = (e.stdout || '') + (e.stderr || ''); waitCode = e.status; }
+  check('wait times out with a clear error, exit 1',
+        waitCode === 1 && waitOut.includes('never selector'), `exit ${waitCode}`);
+  check('snapshot stays ungated', gated('snapshot').code === 0);
+  check('wait stays ungated', gated('wait', '--for', 'url', hostProbe, '--timeout', '1').code === 0);
+
+  // --wait calm settles on page quiet instead of a fixed sleep. It must finish
+  // well under the fixed 1500ms default on this static fixture.
+  const calmT0 = Date.now();
+  ab('goto', url + 'interstitial', '--wait', 'calm');
+  const calmMs = Date.now() - calmT0;
+  check(`goto --wait calm settles instead of sleeping (${calmMs}ms)`,
+        calmMs < 2400 && calmMs >= 300, `${calmMs}ms`);
+  const calmEnv = execFileSync('node',
+    [join(DIR, '..', 'gaze.mjs'), 'goto', url + 'passive'],
+    { env: { ...process.env, GAZE_PORT: String(PORT), GAZE_STATE: state,
+             GAZE_APPROVAL: 'off', GAZE_WAIT: 'calm' },
+      encoding: 'utf8', timeout: 15000 });
+  check('GAZE_WAIT=calm opts a whole run in', calmEnv.includes('URL:'));
+
   // ---- batch: many commands, ONE connection ----
   const script = join(DIR, 'batch.tmp');
   writeFileSync(script, ['tabs', 'text --max 40', 'scrape "nav a" --max 3'].join('\n'));
