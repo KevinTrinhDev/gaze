@@ -586,6 +586,69 @@ async function dispatch(ctx, argv) {
       console.log('pressed:', positional[0]);
       break;
     }
+    case 'select': {
+      const p = pick(ctx, flag('tab'));
+      const [sel, val] = positional;
+      if (!sel || val === undefined) throw new Error('usage: gaze select <selector> <option-value>');
+      const { loc, how } = await withRetry(
+        () => locate(p, sel, { timeout: Number(flag('timeout', 15000)) }));
+      let used = 'value';
+      await withRetry(async () => {
+        const tag = String(await loc.evaluate(el => el.tagName.toLowerCase()));
+        if (tag !== 'select')
+          throw new Error(`select: ${sel} is a <${tag}>, not a <select>`);
+        try { await loc.selectOption({ value: val }); }
+        catch {
+          try { await loc.selectOption({ label: val }); used = 'label'; }
+          catch { throw new Error(`select: no option '${val}' (as value or label) in ${sel}`); }
+        }
+      });
+      {
+        const w = flag('wait');
+        if (wantCalm(w)) await calmPage(p, 1000);
+        else await p.waitForTimeout(wantMs(w, 600));
+      }
+      console.log(`selected: ${sel} -> '${val}'${used === 'label' ? ' (by label)' : ''}` +
+                  `${how === 'selector' ? '' : ` (matched by ${how})`}`);
+      break;
+    }
+    case 'hover': {
+      const p = pick(ctx, flag('tab'));
+      const sel = positional[0];
+      if (!sel) throw new Error('usage: gaze hover <selector>');
+      const { loc, how } = await withRetry(
+        () => locate(p, sel, { timeout: Number(flag('timeout', 15000)) }));
+      await withRetry(() => loc.hover({ timeout: Number(flag('timeout', 15000)) }));
+      await p.waitForTimeout(Number(flag('wait', 400)));
+      console.log(`hovered: ${sel}${how === 'selector' ? '' : ` (matched by ${how})`}`);
+      break;
+    }
+    case 'clear': {
+      const p = pick(ctx, flag('tab'));
+      const sel = positional[0];
+      if (!sel) throw new Error('usage: gaze clear <selector>');
+      const { loc, how } = await withRetry(
+        () => locate(p, sel, { timeout: Number(flag('timeout', 15000)) }));
+      await withRetry(() => loc.clear({ timeout: Number(flag('timeout', 15000)) }));
+      await p.waitForTimeout(Number(flag('wait', 300)));
+      console.log(`cleared: ${sel}${how === 'selector' ? '' : ` (matched by ${how})`}`);
+      break;
+    }
+    case 'doubleclick': {
+      const p = pick(ctx, flag('tab'));
+      const sel = positional[0];
+      if (!sel) throw new Error('usage: gaze doubleclick <selector>');
+      const { loc, how } = await withRetry(
+        () => locate(p, sel, { timeout: Number(flag('timeout', 15000)) }));
+      await withRetry(() => loc.dblclick({ timeout: Number(flag('timeout', 15000)) }));
+      {
+        const w = flag('wait');
+        if (wantCalm(w)) await calmPage(p, 1200);
+        else await p.waitForTimeout(wantMs(w, 800));
+      }
+      console.log(`double-clicked: ${sel}${how === 'selector' ? '' : ` (matched by ${how})`}`);
+      break;
+    }
     // Scrolling is what a person does before deciding what to click, and a
     // scraping tool that cannot reach lazily-loaded content below the fold is
     // missing a step everyone hits. It is gated like other writes because it
@@ -1270,7 +1333,11 @@ const USAGE = `gaze <cmd>
          [--format mp4|frames]    mp4 needs ffmpeg and is optional.
          [--max-mb N] [--out f]   bounded by time, fps and disk budget.
   click <sel> [--text]          click (use --text to match visible text)
+  doubleclick <sel>             double-click (dblclick)
+  hover <sel>                   hover (mouseover handlers fire)
   fill <sel> <val> [--enter]    fill a field
+  clear <sel>                   clear a field (input/textarea/[contenteditable])
+  select <sel> <value|label>    choose an option in a <select>
   press <Key>                   keyboard press
   scroll up|down|top|bottom     scroll the page [--px N]
   scroll to <sel>               scroll an element into view
@@ -1329,7 +1396,7 @@ const argv = process.argv.slice(2);
 // Help must work when NO browser is running: connecting first turned `gaze --help`
 // into a raw CDP "ECONNREFUSED" stack. Resolve help and unknown commands here,
 // before attach() is ever called.
-const KNOWN_CMDS = new Set(['tabs', 'goto', 'text', 'html', 'snapshot', 'state', 'wait', 'map', 'shot', 'record', 'click', 'fill', 'press', 'scroll', 'eval', 'download', 'upload', 'indicator', 'scrape', 'links', 'table', 'console', 'network', 'session', 'challenge', 'wait-human', 'login', 'batch', 'stats', 'log', 'grant', 'revoke', 'grant-status']);
+const KNOWN_CMDS = new Set(['tabs', 'goto', 'text', 'html', 'snapshot', 'state', 'wait', 'map', 'shot', 'record', 'click', 'fill', 'press', 'select', 'hover', 'clear', 'doubleclick', 'scroll', 'eval', 'download', 'upload', 'indicator', 'scrape', 'links', 'table', 'console', 'network', 'session', 'challenge', 'wait-human', 'login', 'batch', 'stats', 'log', 'grant', 'revoke', 'grant-status']);
 if (!argv.length || ['help', '--help', '-h'].includes(argv[0])) {
   console.log(USAGE);
   process.exit(0);
