@@ -161,6 +161,13 @@ try {
   ab('fill', 'input[name="email"]', 'someone@example.test');
   const filled = JSON.parse(ab('eval', 'document.querySelector(\'input[name="email"]\').value'));
   check('fill writes into the field', filled === 'someone@example.test', String(filled));
+  const fillTrusted = ab('fill', 'input[name="password"]', 'pw-trusted');
+  check('fill reports which input path ran',
+        fillTrusted.includes('filled:') && /trusted input|synthetic fallback/.test(fillTrusted),
+        fillTrusted.trim());
+  ab('click', '#click-me');
+  check('click is a trusted pointer action (isTrusted)',
+        JSON.parse(ab('eval', 'document.getElementById(\'click-count\').textContent')).includes('1'));
 
   // ---- the consent gate exists on THIS backend too ------------------------
   // It did not, for the whole life of the Firefox backend: writes ran with no
