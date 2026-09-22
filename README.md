@@ -1,16 +1,21 @@
-<p align="center">
-  <img src="docs/banner.png" alt="GAZE" width="100%">
-</p>
+<div align="center">
 
-<p align="center">
-  <a href="docs/USAGE.md">Usage</a> ·
-  <a href="docs/GAUNTLET.md">Benchmark</a> ·
-  <a href="docs/COMPARISON.md">Comparison</a> ·
-  <a href="docs/SECURITY.md">Security</a> ·
-  <a href="docs/RESEARCH.md">Research</a> ·
-  <a href="docs/ROADMAP.md">Roadmap</a> ·
-  <a href="docs/OPERATING.md">Operating</a>
-</p>
+<img src="docs/banner.png" alt="GAZE — drives the browser you're signed into" width="880">
+
+**It sees the page, and it acts.**
+
+`gaze` is a CLI + local stdio MCP server that drives **the browser you are already
+signed in to** — with a consent gate on every write.
+
+[![License: MPL-2.0](https://img.shields.io/badge/License-MPL--2.0-orange)](LICENSE)
+[![Tests: 195](https://img.shields.io/badge/Tests-195-brightgreen)](docs/GAUNTLET.md)
+[![Benchmark: 100/100](https://img.shields.io/badge/Benchmark-100%2F100-%23ffd700)](docs/GAUNTLET.md)
+[![PRs green](https://img.shields.io/badge/CI-green-success)](#)
+[![npm audit: 0 vulns](https://img.shields.io/badge/audit-0%20vulns-9C70F4)](#)
+
+[Usage](docs/USAGE.md) · [Benchmark](docs/GAUNTLET.md) · [Security](docs/SECURITY.md) · [Comparison](docs/COMPARISON.md) · [Research](docs/RESEARCH.md) · [Roadmap](docs/ROADMAP.md)
+
+</div>
 
 ---
 
