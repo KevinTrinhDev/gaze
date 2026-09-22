@@ -8,10 +8,10 @@
 signed in to** — with a consent gate on every write.
 
 [![License: MPL-2.0](https://img.shields.io/badge/License-MPL--2.0-orange)](LICENSE)
-[![Tests: 195](https://img.shields.io/badge/Tests-195-brightgreen)](docs/GAUNTLET.md)
+[![Tests: 31 consent + launch](https://img.shields.io/badge/Tests-31%20consent%20%2B%20launch-brightgreen)](test/)
 [![Benchmark: 100/100](https://img.shields.io/badge/Benchmark-100%2F100-%23ffd700)](docs/GAUNTLET.md)
-[![PRs green](https://img.shields.io/badge/CI-green-success)](#)
-[![npm audit: 0 vulns](https://img.shields.io/badge/audit-0%20vulns-9C70F4)](#)
+[![CI: green](https://img.shields.io/badge/CI-green-success)](https://github.com/KevinTrinhDev/gaze/actions)
+[![npm audit: 0 vulns](https://img.shields.io/badge/audit-0%20vulns-9C70F4)](https://github.com/KevinTrinhDev/gaze)
 
 [Usage](docs/USAGE.md) · [Benchmark](docs/GAUNTLET.md) · [Security](docs/SECURITY.md) · [Comparison](docs/COMPARISON.md) · [Research](docs/RESEARCH.md) · [Roadmap](docs/ROADMAP.md)
 

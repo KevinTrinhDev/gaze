@@ -3,9 +3,17 @@ browser.log
 downloads/
 shots/
 profiles/
-*.png
 recordings/
 *.mp4
+
+# secrets & keys (defense-in-depth; nothing is tracked today)
+.env
+.env.*
+*.pem
+*.key
+id_*
+*.p12
+*.kdbx
 
 # ...but the repo art is intentional
 !docs/*.png
