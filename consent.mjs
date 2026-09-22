@@ -270,6 +270,22 @@ export function approve(actions, where) {
     say('  touch the fingerprint reader to approve...\n');
     const r = spawnSync('fprintd-verify', [], { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' });
     const ok = r.status === 0 && /verify-match/.test((r.stdout || '') + (r.stderr || ''));
+    if (ok) {
+      // Proof of presence: a timestamped webcam photo beside the fingerprint
+      // match. Best-effort — a missing camera never blocks an approval.
+      try {
+        const dir = `${STATE}/approvals`;
+        mkdirSync(dir, { recursive: true });
+        const photo = `${dir}/approval-${new Date().toISOString().replace(/[:.]/g, '-')}.jpg`;
+        const cap = spawnSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'v4l2',
+          '-i', process.env.GAZE_CAM || '/dev/video0', '-frames:v', '1', '-q:v', '2',
+          photo, '-y'], { encoding: 'utf8', timeout: 15000 });
+        if (cap.status === 0 && existsSync(photo)) {
+          chmodSync(photo, 0o600);
+          say(`  photo: ${photo}\n`);
+        }
+      } catch { /* a camera is a bonus, never a gate */ }
+    }
     say(ok ? '  approved (fingerprint)\n' : '  DENIED (no fingerprint match)\n');
     return ok;
   }
