@@ -4,13 +4,13 @@
 // Firefox removed CDP in 141, so the Chromium path (gaze.mjs, Playwright over CDP)
 // cannot drive it. --remote-debugging-port on Firefox now serves BiDi, which this
 // speaks directly: Node 22 ships a global WebSocket, so no extra dependency.
-import { writeFileSync, chmodSync } from 'node:fs';
+import { writeFileSync, chmodSync, mkdirSync, appendFileSync } from 'node:fs';
 // The SAME gate and the SAME untrusted envelope as the Chromium backend. Before
 // this, neither existed here: `GAZE_BROWSER=firefox gaze click ...` ran with no
 // approval at all, and page text came back bare with no injection scan, while
 // the README and the MCP server both claimed the two backends behaved
 // identically. Importing the one implementation is what makes that true.
-import { isWrite, approve, preApproved, say } from './consent.mjs';
+import { isWrite, approve, preApproved, say, STATE, guardUrl } from './consent.mjs';
 import { emit } from './untrusted.mjs';
 
 const PORT = process.env.GAZE_PORT || '9225';
@@ -25,6 +25,38 @@ try { process.stdout._handle?.setBlocking?.(true); } catch {}
 try { process.stderr._handle?.setBlocking?.(true); } catch {}
 
 const stamp = () => new Date().toISOString().replace(/[:.]/g, '-');
+
+// Local, append-only, mode-600 record of what ran, shared with the Chromium
+// backend so `gaze stats` / `gaze log` cover BOTH backends identically.
+const LOG_FILE = `${STATE}/log.jsonl`;
+const LOG_ON = (process.env.GAZE_LOG || 'on') !== 'off';
+const REDACT = new Set(['fill', 'login', 'eval']);
+const stripQ = u => {
+  try {
+    const x = new URL(u);
+    if (x.protocol === 'http:' || x.protocol === 'https:')
+      return x.origin + x.pathname + (x.search || x.hash ? '?<redacted>' : '');
+    return u;
+  } catch { return u; }
+};
+function logLine(cmd, argv, host, ms, ok, err) {
+  if (!LOG_ON) return;
+  try {
+    mkdirSync(STATE, { recursive: true });
+    const args = REDACT.has(cmd)
+      ? argv.slice(1).map(a => (a.startsWith('--') || (cmd !== 'eval' && a === argv[1]) ? a : '<redacted>'))
+      : cmd === 'goto'
+        ? argv.slice(1).map(a => (a.startsWith('--') ? a : stripQ(a)))
+        : cmd === 'wait'
+          ? argv.slice(1).map(a => (a.startsWith('--') ? a : '<redacted>'))
+          : argv.slice(1);
+    appendFileSync(LOG_FILE, JSON.stringify({
+      ts: new Date().toISOString(), cmd, args, host, ms, ok,
+      ...(err ? { err: String(err).slice(0, 200) } : {}),
+    }) + '\n');
+    chmodSync(LOG_FILE, 0o600);
+  } catch { /* logging must never break the command */ }
+}
 
 class Bidi {
   #ws; #id = 0; #pending = new Map();
@@ -44,6 +76,17 @@ class Bidi {
       this.#pending.delete(m.id);
       m.type === 'error' ? p.rej(new Error(m.message || 'bidi error')) : p.res(m.result);
     });
+    // A dropped socket must FAIL the in-flight commands, not let them dangle and
+    // let the process exit 0 as if the command had succeeded.
+    const fail = () => {
+      for (const p of this.#pending.values()) {
+        clearTimeout(p.timer);
+        p.rej(new Error('BiDi connection closed'));
+      }
+      this.#pending.clear();
+    };
+    this.#ws.addEventListener('close', fail);
+    this.#ws.addEventListener('error', fail);
     // Attaching to an already-running browser still needs a session.
     this.session = await this.send('session.new', { capabilities: { alwaysMatch: {} } })
       .catch(() => null);                   // already has one: fine
@@ -223,8 +266,20 @@ if (isWrite([cmd, ...positional]) && !preApprovedRun) {
 }
 
 const b = new Bidi();
+const t0 = Date.now();
+let ok = true, err = null;
 try {
   await b.connect();
+  // Same NEVER_AUTO hard stop as the Chromium backend: refuse writes aimed at a
+  // password manager's own DOM, however they are reached.
+  if (isWrite([cmd, ...positional])) {
+    try {
+      const ctx = await b.pick(flag('tab'));
+      guardUrl(await b.evaluate(ctx, 'location.href'), cmd);
+    } catch (e) {
+      if (e?.message?.startsWith('refusing to')) throw e;
+    }
+  }
   switch (cmd) {
     case 'tabs': {
       const cs = await b.contexts();
@@ -553,11 +608,16 @@ try {
   network, session, login, batch, indicator, wait --for network-idle.`);
   }
 } catch (e) {
+  ok = false; err = e.message;
   console.error('ERR:', e.message);
   // Never process.exit() here: the finally below closes the BiDi session, and
   // a session left open leaks into the NEXT command ("session does not exist,
   // or is not active"). Set the code and let cleanup run, then exit naturally.
   process.exitCode = 1;
 } finally {
+  try {
+    logLine(cmd, [cmd, ...rawArgs], null, Date.now() - t0,
+            ok && !process.exitCode, err || (process.exitCode ? `exit ${process.exitCode}` : null));
+  } catch {}
   await b.close();
 }

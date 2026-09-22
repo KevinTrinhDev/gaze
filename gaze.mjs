@@ -38,7 +38,7 @@ import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { STATE, WRITE_CMDS, isWrite, APPROVAL, approve, askTty, preApproved, afterDashDash, say, out,
          readGrant, claimGrant, grantLeft, remainingOf,
-         issueGrant, revokeGrant, GRANT_FILE, TICKETS } from './consent.mjs';
+         issueGrant, revokeGrant, GRANT_FILE, TICKETS, guardUrl as guard } from './consent.mjs';
 import { emit, sniff } from './untrusted.mjs';
 
 const DIR = new URL('.', import.meta.url).pathname;
@@ -48,13 +48,6 @@ const SESSIONS = `${STATE}/sessions`;
 // tab identity so `goto --new`, then `shot`/`text`/`map`, acts on the new page
 // rather than whichever existing tab happens to be last in CDP's page list.
 const ACTIVE_TAB = `${STATE}/active-tab`;
-
-// Sites whose DOM must never be automated. Mirrors agent-daemon/src/allowlist.ts:
-// we bridge to the vault's CLI, we never drive the vault's own web UI.
-const NEVER_AUTO = [
-  'vault.bitwarden.com', 'bitwarden.com', 'accounts.google.com/signin/challenge',
-  '1password.com', 'lastpass.com',
-];
 
 async function attach() {
   // A dead browser is the single most common failure, and a raw Playwright
@@ -121,13 +114,6 @@ try { process.stdout._handle?.setBlocking?.(true); } catch {}
 try { process.stderr._handle?.setBlocking?.(true); } catch {}
 
 const stamp = () => new Date().toISOString().replace(/[:.]/g, '-');
-
-function guard(url, what) {
-  const hit = NEVER_AUTO.find(d => url.includes(d));
-  if (hit) throw new Error(
-    `refusing to ${what} on ${hit}: this tool bridges to the vault CLI, ` +
-    `it never drives a vault's own web UI`);
-}
 
 // Find an element, and keep trying sensible alternatives before giving up.
 //
@@ -537,7 +523,7 @@ async function dispatch(ctx, argv) {
         try { await p.evaluate(injectBadge, readFileSync(INDICATOR_FILE, 'utf8')); } catch {}
       }
       setActive(ctx, p);
-      console.log('URL:', p.url());
+      console.log('URL:', stripQuery(p.url()));
       console.log('TITLE:', await p.title());
       break;
     }
@@ -577,7 +563,7 @@ async function dispatch(ctx, argv) {
         else await p.waitForTimeout(wantMs(w, 1200));
       }
       console.log(`clicked: ${sel}${how === 'selector' ? '' : ` (matched by ${how})`}` +
-                  `${note} | now: ${p.url()}`);
+                  `${note} | now: ${stripQuery(p.url())}`);
       break;
     }
     case 'fill': {
@@ -990,7 +976,9 @@ async function dispatch(ctx, argv) {
       if (has('submit')) { await p.keyboard.press('Enter'); await p.waitForTimeout(2500); }
       // Never print the values.
       console.log(`filled credentials for "${item}"${user ? ' (username + password)' : ' (password)'}${has('totp') ? ' + totp' : ''}`);
-      console.log('now:', p.url());
+      // The post-login URL can carry an OAuth/SSO token in its query string;
+      // keep origin + path, exactly as the log does.
+      console.log('now:', stripQuery(p.url()));
       break;
     }
 
@@ -1016,6 +1004,8 @@ async function dispatch(ctx, argv) {
       const format = flag('format', 'mp4');            // mp4 | frames
       const outDir = `${DIR}recordings/rec-${stamp()}`;
       mkdirSync(outDir, { recursive: true });
+      // A recording can hold anything on screen: owner-only, like a shot.
+      try { chmodSync(outDir, 0o700); } catch {}
 
       const frames = Math.round(secs * fps);
       const interval = 1000 / fps;
@@ -1045,6 +1035,7 @@ async function dispatch(ctx, argv) {
         '-pix_fmt', 'yuv420p', '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', outFile],
         { encoding: 'utf8' });
       if (enc.status === 0 && existsSync(outFile)) {
+        try { chmodSync(outFile, 0o600); } catch {}        // owner-only, like a shot
         rmSync(outDir, { recursive: true, force: true });   // frames folded into the mp4
         console.log(outFile);
       } else {
@@ -1632,6 +1623,13 @@ try {
       line, parts: line.match(/"[^"]*"|\S+/g).map(s => s.replace(/^"|"$/g, '')) }));
     // ONE confirmation for the whole script, not one per step.
     const writes = parsed.filter(p => isWrite(p.parts));
+    // Hard stop: never drive a password manager's own DOM, even via batch.
+    // Also refuse to *navigate* to one in a batch, or a goto-then-write would
+    // slip past the write-time guard (which runs before the goto lands).
+    for (const w of parsed) {
+      if (isWrite(w.parts)) guard(where(), w.parts[0]);
+      if (w.parts[0] === 'goto' && w.parts[1]) guard(w.parts[1], 'navigate');
+    }
     if (writes.length && !preApprovedRun && !approve(writes.map(w => w.line), where())) {
       say('ERR: not approved\n');
       process.exitCode = 3;
@@ -1642,6 +1640,9 @@ try {
       }
     }
   } else {
+    // Hard stop: never drive a password manager's own DOM, however it is
+    // reached. This refuses even when --yes pre-approves.
+    if (isWrite(argv)) guard(where(), argv[0]);
     if (isWrite(argv) && !preApprovedRun &&
         !approve([argv.join(' ')], where())) {
       say('ERR: not approved\n');

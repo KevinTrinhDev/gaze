@@ -48,7 +48,23 @@ export const WRITE_CMDS = new Set(['click', 'fill', 'press', 'download', 'eval',
                                    'scroll', 'select', 'hover', 'clear',
                                    'doubleclick']);
 export const isWrite = a =>
-  WRITE_CMDS.has(a[0]) && !(a[0] === 'session' && (a[1] || 'list') === 'list');
+  (WRITE_CMDS.has(a[0]) && !(a[0] === 'session' && (a[1] || 'list') === 'list')) ||
+  // A reload navigates the page and re-runs its scripts: a real state change
+  // that must ask first, exactly like any other write.
+  ((a[0] === 'console' || a[0] === 'network') && a.includes('--reload'));
+
+// Sites whose DOM must never be automated. Shared by BOTH backends: gaze
+// bridges to the vault's CLI, it never drives the vault's own web UI.
+export const NEVER_AUTO = [
+  'vault.bitwarden.com', 'bitwarden.com', 'accounts.google.com/signin/challenge',
+  '1password.com', 'lastpass.com',
+];
+export const guardUrl = (url, what) => {
+  const hit = NEVER_AUTO.find(d => url.includes(d));
+  if (hit) throw new Error(
+    `refusing to ${what} on ${hit}: this tool bridges to the vault CLI, ` +
+    `it never drives a vault's own web UI`);
+};
 
 export const APPROVAL = process.env.GAZE_APPROVAL || 'prompt';
 
